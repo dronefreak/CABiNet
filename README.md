@@ -17,7 +17,7 @@ Semantic segmentation results on the Cityscapes validation set are shown below. 
 
 Semantic segmentation results on the UAVid (Lyu et al., 2020) validation set shown below. First row consists of the input RGB images. Second row contains the predictions from our model and the third row shows the ground truth of t.he input images. White boxes highlight the regions. of improvement over the state-of-the-art (Lyu et al., 2020).
 
-![title](imgs/uavid.jpg)
+![title](imgs/uavid_r.jpg)
 
 
 # Citation
