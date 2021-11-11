@@ -1,3 +1,3 @@
 # CABiNet
 
-![title](imgs/cabinet.png)
+![title](imgs/cabinet.jpg)
