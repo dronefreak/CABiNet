@@ -50,10 +50,6 @@ Once you have the trained models, please use `evaluate_cabinet_citys.py` to eval
 
 A small note for UAVid, it might not be very straigtforward to use directly the UAVid dataset, there is a small conversion step in between that allows the dataset to be used by the training and evaluation scripts. The conversion script basically makes the UAVid dataset more like CityScapes in directory structure. I will upload it as soon as I find it.
 
-## Pre-trained CABiNet Models 
-
-Sorry to dissapoint you guys, but at the moment, I was only able to recover the codes for this work (after series of crashes in my system), the saved models were not recovered, so I would need to re-train evevrything again. Also, I do not have a server at my disposal at the moment, so if anyone of you is interested in re-training or taking this work forward, please let me know I will be very happy to collaborate and help.
-
 ## Issues and Pull Requests
 
 Please feel free to create PRs and/or send me issues directly to `kumaar324@gmail.com`. I will be happy to help, but I might not be available a lot of times, still I will try my best.
