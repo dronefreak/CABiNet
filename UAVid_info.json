@@ -1,0 +1,131 @@
+[
+
+  {
+    "hasInstances": false,
+    "category": "void",
+    "catid": 0,
+    "name": "Clutter",
+    "ignoreInEval": true,
+    "id": 0,
+    "color": [
+      0,
+      0,
+      0
+    ],
+    "trainId": 0
+  },
+
+  {
+    "hasInstances": false,
+    "category": "construction",
+    "catid": 1,
+    "name": "Building",
+    "ignoreInEval": false,
+    "id": 1,
+    "color": [
+      128,
+      0,
+      0
+    ],
+    "trainId": 1
+  },
+  {
+    "hasInstances": false,
+    "category": "flat",
+    "catid": 2,
+    "name": "Road",
+    "ignoreInEval": false,
+    "id": 2,
+    "color": [
+      128,
+      64,
+      128
+    ],
+    "trainId": 2
+  },
+  {
+    "hasInstances": false,
+    "category": "vehicle",
+    "catid": 3,
+    "name": "Static Car",
+    "ignoreInEval": false,
+    "id": 3,
+    "color": [
+      192,
+      0,
+      192
+    ],
+    "trainId": 3
+  },
+  {
+    "hasInstances": false,
+    "category": "vegetation",
+    "catid": 4,
+    "name": "Tree",
+    "ignoreInEval": false,
+    "id": 4,
+    "color": [
+      0,
+      128,
+      0
+    ],
+    "trainId": 4
+  },
+  {
+    "hasInstances": false,
+    "category": "vegetation",
+    "catid": 4,
+    "name": "Vegetation",
+    "ignoreInEval": false,
+    "id": 5,
+    "color": [
+      128,
+      128,
+      0
+    ],
+    "trainId": 5
+  },
+  {
+    "hasInstances": false,
+    "category": "person",
+    "catid": 5,
+    "name": "Human",
+    "ignoreInEval": false,
+    "id": 6,
+    "color": [
+      64,
+      64,
+      0
+    ],
+    "trainId": 6
+  },
+  {
+    "hasInstances": false,
+    "category": "vehicle",
+    "catid": 3,
+    "name": "Moving Car",
+    "ignoreInEval": false,
+    "id": 7,
+    "color": [
+      64,
+      0,
+      128
+    ],
+    "trainId": 7
+  },
+    {
+    "hasInstances": false,
+    "category": "void",
+    "catid": 0,
+    "name": "something",
+    "ignoreInEval": true,
+    "id": 8,
+    "color": [
+      0,
+      10,
+      0
+    ],
+    "trainId": 255
+  }
+
+]
