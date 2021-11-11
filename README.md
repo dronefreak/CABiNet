@@ -20,6 +20,24 @@ Semantic segmentation results on the UAVid (Lyu et al., 2020) validation set sho
 ![title](imgs/uavid_r.jpg)
 
 
+## File Description
+
+* `cab.py` - Contains the implementation of context aggregation block, which is a plug-n-play module, can be added to any PyTorch based network.
+* `cabinet.py` - Contains the implementation of the proposed CABiNet model.
+* `cityscapes.py` - CityScapes dataloader which requires `cityscapes_info.json` (contains a general description of valid/invalid classes etc.)
+* `uavid.py` - UAVid dataloader which requires `UAVid_info.json` (contains a general description of valid/invalid classes etc.)
+* `loss.py` - Contains the loss functions for training models.
+* `optimizer.py` - Contains the optimizers for training models.
+* `mobilenetv3.py` - Contains the implementation of the MobileNetV3 backbones (both Large and Small), the pretrained weights for these backbones can be found under `pretrained/` folder of the repo.
+* `transform.py` - Contains data augmentation techniques.
+* `train_cabinet_citys.py` - Training code for CABiNet on CityScapes (a similar one can be used for training the model on UAVid, just by changing the imported libraries and path of the datasets).
+* `evaluate_cabinet_citys.py` - Evaluation code for trained models, can be used in both multi-scale and single-scale mode.
+* `demo.py` - A small demo code for running trained models on custom images.
+
+## Requirements
+
+A conda environment file has been provided in this repo, called `cabinet_environment.yml`. So all you need to setup the repo is to run `conda env create -f cabinet_environment.yml` and everything should be okay. This implementation works with PyTorch>1.0.0 (could work with lower versions, but I have not tested them).
+
 # Citation
 
 If you find this work helpful, please consider citing the following articles:
