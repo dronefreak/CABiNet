@@ -38,6 +38,26 @@ Semantic segmentation results on the UAVid (Lyu et al., 2020) validation set sho
 
 A conda environment file has been provided in this repo, called `cabinet_environment.yml`. So all you need to setup the repo is to run `conda env create -f cabinet_environment.yml` and everything should be okay. This implementation works with PyTorch>1.0.0 (could work with lower versions, but I have not tested them).
 
+## Training/Evaluation on CityScapes and UAVid
+
+Well the pipeline should be pretty easy, you need to download the CityScapes dataset from [here](https://www.cityscapes-dataset.com/downloads/). Look for `gtFine_trainvaltest.zip (241MB)` for the GT and 
+`leftImg8bit_trainvaltest.zip (11GB)` for the input corresponding RGB images.
+
+Then simply specify the path for the dataset in the `train_cabinet_citys.py` script alongwith a GPU device number (one on which you plan to run the training) and run `python3 train_cabinet_citys.py --local_rank {DEVICE_NUM}`
+Please note that the dataloader by default, expects the training data to be under `'./citys/leftImg8bit/train'` and similarly for UAVid `'./uavid/leftImg8bit/train'`
+
+Once you have the trained models, please use `evaluate_cabinet_citys.py` to evaluate the models on the validation sets (as the name indicates, the script works by default with CityScapes, but can be easily modified for UAVid). Please note that this script expects the pre-trained models under `./trial` and dataset under `./citys`.
+
+A small note for UAVid, it might not be very straigtforward to use directly the UAVid dataset, there is a small conversion step in between that allows the dataset to be used by the training and evaluation scripts. The conversion script basically makes the UAVid dataset more like CityScapes in directory structure. I will upload it as soon as I find it.
+
+## Pre-trained CABiNet Models 
+
+Sorry to dissapoint you guys, but at the moment, I was only able to recover the codes for this work (after series of crashes in my system), the saved models were not recovered, so I would need to re-train evevrything again. Also, I do not have a server at my disposal at the moment, so if anyone of you is interested in re-training or taking this work forward, please let me know I will be very happy to collaborate and help.
+
+## Issues and Pull Requests
+
+Please feel free to create PRs and/or send me issues directly to `kumaar324@gmail.com`. I will be happy to help, but I might not be available a lot of times, still I will try my best.
+
 # Citation
 
 If you find this work helpful, please consider citing the following articles:
