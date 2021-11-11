@@ -4,17 +4,22 @@ With the increasing demand of autonomous systems, pixelwise semantic segmentatio
 
 ![title](imgs/cabinet.jpg)
 
+# Citation
+
+If you find this research helpful, please consider citing the following article:
+
 ```
 @INPROCEEDINGS{9560977,
   author={Kumaar, Saumya and Lyu, Ye and Nex, Francesco and Yang, Michael Ying},
   booktitle={2021 IEEE International Conference on Robotics and Automation (ICRA)}, 
   title={CABiNet: Efficient Context Aggregation Network for Low-Latency Semantic Segmentation}, 
   year={2021},
-  volume={},
-  number={},
   pages={13517-13524},
   doi={10.1109/ICRA48506.2021.9560977}}
 
+```
+and 
+```
 @article{YANG2021124,
 title = {Real-time Semantic Segmentation with Context Aggregation Network},
 journal = {ISPRS Journal of Photogrammetry and Remote Sensing},
