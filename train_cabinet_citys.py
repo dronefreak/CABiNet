@@ -16,47 +16,38 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import torch.distributed as dist
 
-import os
-import os.path as osp
+from pathlib import Path
 import logging
 import time
 import datetime
 import argparse
+import json
 
 
-respth = './trial'
-if not osp.exists(respth): os.makedirs(respth)
-logger = logging.getLogger()
+def train(params, logger):
+	""" Set directories """
+	respth = Path(params["training_config"]["experiments_path"])
+	Path.mkdir(respth, parents=True, exist_ok=True)
 
-
-def parse_args():
-	parse = argparse.ArgumentParser()
-	parse.add_argument(
-			'--local_rank',
-			dest = 'local_rank',
-			type = int,
-			default = -1,
-			)
-	return parse.parse_args()
-
-
-def train():
-	args = parse_args()
-	torch.cuda.set_device(args.local_rank)
+	torch.cuda.set_device(params["training_config"]["gpu_id"])
 	dist.init_process_group(
 				backend = 'nccl',
 				init_method = 'tcp://127.0.0.1:33271',
 				world_size = torch.cuda.device_count(),
-				rank=args.local_rank
+				rank=params["training_config"]["gpu_id"]
 				)
 	setup_logger(respth)
 
-	## dataset
-	n_classes = 19
-	n_img_per_gpu = 1
-	n_workers = 4
-	cropsize = [1024, 1024]
-	ds = CityScapes('./citys', cropsize=cropsize, mode='train')
+	""" Set Dataset Params """
+	n_classes = params["dataset_config"]["num_classes"]
+	n_img_per_gpu = params["training_config"]["batch_size"]
+	n_workers = params["training_config"]["num_workers"]
+	cropsize = params["dataset_config"]["cropsize"]
+	dataset_path = params["dataset_config"]["dataset_path"]
+	mode = params["training_config"]["mode"]
+
+	""" Prepare DataLoader """
+	ds = CityScapes(dataset_path, cropsize=cropsize, mode=mode)
 	sampler = torch.utils.data.distributed.DistributedSampler(ds)
 	dl = DataLoader(ds,
 					batch_size = n_img_per_gpu,
@@ -66,14 +57,14 @@ def train():
 					pin_memory = True,
 					drop_last = True)
 
-	## model
-	ignore_idx = 255
+	""" Set Model of CABiNet """
+	ignore_idx = params["dataset_config"]["ignore_idx"]
 	net = CABiNet(n_classes=n_classes)
 	net.cuda()
 	net.train()
 	net = nn.parallel.DistributedDataParallel(net,
-			device_ids = [args.local_rank, ],
-			output_device = args.local_rank,
+			device_ids=[params["training_config"]["gpu_id"],],
+			output_device=params["training_config"]["gpu_id"],
 			find_unused_parameters=True
 			)
 	score_thres = 0.7
@@ -82,14 +73,14 @@ def train():
 	criteria_16 = OhemCELoss(thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx)
 	criteria_32 = OhemCELoss(thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx)
 
-	## optimizer
-	momentum = 0.9
-	weight_decay = 5e-4
-	lr_start = 5e-3
-	max_iter = 10000
-	power = 0.9
-	warmup_steps = 2000
-	warmup_start_lr = 1e-5
+	""" Set Optimization Parameters """
+	momentum = params["training_config"]["optimizer_momentum"]
+	weight_decay = params["training_config"]["optimizer_weight_decay"]
+	lr_start = params["training_config"]["optimizer_lr_start"]
+	max_iter = params["training_config"]["max_iterations"]
+	power = params["training_config"]["optimizer_power"]
+	warmup_steps = params["training_config"]["warmup_stemps"]
+	warmup_start_lr = params["training_config"]["warmup_start_lr"]
 	optim = Optimizer(
 			model = net.module,
 			lr0 = lr_start,
@@ -100,8 +91,8 @@ def train():
 			max_iter = max_iter,
 			power = power)
 
-	## train loop
-	msg_iter = 50
+	""" Set Train Loop """
+	msg_iter = params["training_config"]["msg_iterations"]
 	loss_avg = []
 	st = glob_st = time.time()
 	diter = iter(dl)
@@ -130,7 +121,8 @@ def train():
 		optim.step()
 
 		loss_avg.append(loss.item())
-		## print training log message
+
+		""" Log Values """
 		if (it+1)%msg_iter==0:
 			loss_avg = sum(loss_avg) / len(loss_avg)
 			lr = optim.lr
@@ -156,14 +148,24 @@ def train():
 			loss_avg = []
 			st = ed
 
-	## dump the final model
-	save_pth = osp.join(respth, 'cabinet_citys_1024x1024.pth')
+	""" Dump and Save the Final Model """
+	save_pth = respth / params["training_config"]["model_save_name"]
 	net.cpu()
 	state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
-	if dist.get_rank()==0: torch.save(state, save_pth)
-	logger.info('training done, model saved to: {}'.format(save_pth))
+	if dist.get_rank()==0: torch.save(state, str(save_pth))
+	logger.info('Training Finished!; Model Saved to: {}'.format(save_pth))
 
 
 if __name__ == "__main__":
-	train()
-	evaluate()
+
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--config',
+					type=str,
+					default="training_validation_config.json",)
+	args = parser.parse_args()
+	with open(args.config, "r") as f:
+		params = json.loads(f.read())
+	logger = logging.getLogger()
+
+	train(params, logger)
+	# evaluate()
