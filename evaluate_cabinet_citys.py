@@ -6,15 +6,12 @@ from cabinet import CABiNet
 from cityscapes import CityScapes
 
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import torch.distributed as dist
 
-import os
 import os.path as osp
 import logging
-import time
 import numpy as np
 from tqdm import tqdm
 import math
