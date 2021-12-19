@@ -31,6 +31,7 @@ Semantic segmentation results on the UAVid (Lyu et al., 2020) validation set sho
 * `mobilenetv3.py` - Contains the implementation of the MobileNetV3 backbones (both Large and Small), the pretrained weights for these backbones can be found under `pretrained/` folder of the repo.
 * `transform.py` - Contains data augmentation techniques.
 * `train_cabinet_citys.py` - Training code for CABiNet on CityScapes (a similar one can be used for training the model on UAVid, just by changing the imported libraries and path of the datasets).
+* `training_validation_config.json` - Training and validation config file for CABiNet model. Please use this file to manage input/output directories, dataset paths and other training parameters.
 * `evaluate_cabinet_citys.py` - Evaluation code for trained models, can be used in both multi-scale and single-scale mode.
 * `demo.py` - A small demo code for running trained models on custom images.
 
@@ -43,8 +44,10 @@ A conda environment file has been provided in this repo, called `cabinet_environ
 Well the pipeline should be pretty easy, you need to download the CityScapes dataset from [here](https://www.cityscapes-dataset.com/downloads/). Look for `gtFine_trainvaltest.zip (241MB)` for the GT and 
 `leftImg8bit_trainvaltest.zip (11GB)` for the input corresponding RGB images.
 
-Then simply specify the path for the dataset in the `train_cabinet_citys.py` script alongwith a GPU device number (one on which you plan to run the training) and run `python3 train_cabinet_citys.py --local_rank {DEVICE_NUM}`
-Please note that the dataloader by default, expects the training data to be under `'./citys/leftImg8bit/train'` and similarly for UAVid `'./uavid/leftImg8bit/train'`
+Then simply specify the path for the dataset in the `train_cabinet_citys.py` script alongwith a GPU device number (one on which you plan to run the training) and run `python3 train_cabinet_citys.py --config {config_file}`
+Please note that the dataloader (and also the config file) by default, expects the training data to be under `'./citys/leftImg8bit/train'` and similarly for UAVid `'./uavid/leftImg8bit/train'` and the config file `training_validation_config.json` can be used for launching the trainingand validation of the CABiNet model.
+
+__Pre-trained CABiNet models coming soon !!!__
 
 Once you have the trained models, please use `evaluate_cabinet_citys.py` to evaluate the models on the validation sets (as the name indicates, the script works by default with CityScapes, but can be easily modified for UAVid). Please note that this script expects the pre-trained models under `./trial` and dataset under `./citys`.
 
