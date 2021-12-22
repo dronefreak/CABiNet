@@ -182,9 +182,9 @@ class MobileNetV3(nn.Module):
 
 	def _initialize_weights_small(self):
 		if self.width_mult == 0.75: 
-			state_dict = torch.load('pretrained/mobilenetv3-small-0.75-86c972c3.pth')
+			state_dict = torch.load('pretrained_backbones/mobilenetv3-small-0.75-86c972c3.pth')
 		else:
-			state_dict = torch.load('pretrained/mobilenetv3-small-55df8e1f.pth')
+			state_dict = torch.load('pretrained_backbones/mobilenetv3-small-55df8e1f.pth')
 		self_state_dict = self.state_dict()
 		for k, v in state_dict.items():
 			if 'classifier' in k: continue
@@ -194,9 +194,9 @@ class MobileNetV3(nn.Module):
 
 	def _initialize_weights_large(self):
 		if self.width_mult == 0.75: 
-			state_dict = torch.load('pretrained/mobilenetv3-large-0.75-9632d2a8.pth')
+			state_dict = torch.load('pretrained_backbones/mobilenetv3-large-0.75-9632d2a8.pth')
 		else:
-			state_dict = torch.load('pretrained/mobilenetv3-large-1cd25616.pth')
+			state_dict = torch.load('pretrained_backbones/mobilenetv3-large-1cd25616.pth')
 		self_state_dict = self.state_dict()
 		for k, v in state_dict.items():
 			if 'classifier' in k: continue

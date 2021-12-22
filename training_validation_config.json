@@ -30,6 +30,7 @@
         "batch_size": 1,
         "eval_scales": [0.5, 0.75, 1, 1.25, 1.5, 1.75],
         "mode": "val",
-        "validation_output_folder": "./cabinet_experiments/results"
+        "validation_output_folder": "./cabinet_experiments/results",
+        "flip": true
     }
 }

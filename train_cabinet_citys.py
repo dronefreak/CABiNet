@@ -24,7 +24,7 @@ import argparse
 import json
 
 
-def train(params, logger):
+def train_and_evaluate(params, logger):
 	""" Set directories """
 	respth = Path(params["training_config"]["experiments_path"])
 	Path.mkdir(respth, parents=True, exist_ok=True)
@@ -37,6 +37,7 @@ def train(params, logger):
 				rank=params["training_config"]["gpu_id"]
 				)
 	setup_logger(respth)
+	torch.cuda.synchronize()
 
 	""" Set Dataset Params """
 	n_classes = params["dataset_config"]["num_classes"]
@@ -91,8 +92,10 @@ def train(params, logger):
 			max_iter = max_iter,
 			power = power)
 
-	""" Set Train Loop """
+	""" Set Train Loop Params """
 	msg_iter = params["training_config"]["msg_iterations"]
+	save_steps = int(params["training_config"]["max_iterations"] / 10)
+	best_score = 0.0
 	loss_avg = []
 	st = glob_st = time.time()
 	diter = iter(dl)
@@ -119,7 +122,7 @@ def train(params, logger):
 		loss = loss1 + loss2 + loss3
 		loss.backward()
 		optim.step()
-
+		torch.cuda.synchronize()
 		loss_avg.append(loss.item())
 
 		""" Log Values """
@@ -147,6 +150,23 @@ def train(params, logger):
 			logger.info(msg)
 			loss_avg = []
 			st = ed
+		
+		if (it + 1) % save_steps == 0:
+			save_name = params["training_config"]["model_save_name"].split(".pth")[0] + f"_iter_{it + 1}.pth"
+			save_pth = respth / save_name
+			net.cpu()
+			state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
+			if dist.get_rank()==0: torch.save(state, str(save_pth))
+			logger.info(f'{it + 1} iterations Finished!; Model Saved to: {save_pth}')
+			current_score = evaluate(params=params, save_pth=save_pth)
+			if current_score > best_score:
+				save_name = params["training_config"]["model_save_name"].split(".pth")[0] + f"_iter_{it + 1}_best_mIOU_{current_score}.pth"
+				save_pth = respth / save_name
+				state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
+				if dist.get_rank()==0: torch.save(state, str(save_pth))
+				best_score = current_score
+			net.cuda()
+			torch.cuda.synchronize()
 
 	""" Dump and Save the Final Model """
 	save_pth = respth / params["training_config"]["model_save_name"]
@@ -154,6 +174,7 @@ def train(params, logger):
 	state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
 	if dist.get_rank()==0: torch.save(state, str(save_pth))
 	logger.info('Training Finished!; Model Saved to: {}'.format(save_pth))
+	torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":
@@ -167,5 +188,4 @@ if __name__ == "__main__":
 		params = json.loads(f.read())
 	logger = logging.getLogger()
 
-	train(params, logger)
-	# evaluate()
+	train_and_evaluate(params, logger)
