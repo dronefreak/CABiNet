@@ -1,7 +1,6 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
-import os.path as osp
 import time
 import logging
 from pathlib import Path
