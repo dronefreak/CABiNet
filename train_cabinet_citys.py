@@ -167,6 +167,9 @@ def train_and_evaluate(params, logger):
 			state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
 			if dist.get_rank()==0: torch.save(state, str(save_pth))
 			logger.info(f'{it + 1} iterations Finished!; Model Saved to: {save_pth}')
+			net.cuda()
+			net.eval()
+			torch.cuda.synchronize()
 			evaluator = MscEval(net, dl_val, params)
 			current_score = evaluator.evaluate()
 			if current_score > best_score:
@@ -176,6 +179,7 @@ def train_and_evaluate(params, logger):
 				if dist.get_rank()==0: torch.save(state, str(save_pth))
 				best_score = current_score
 			net.cuda()
+			net.train()
 			torch.cuda.synchronize()
 
 	""" Dump and Save the Final Model """
