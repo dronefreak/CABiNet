@@ -2,7 +2,6 @@
 # -*- encoding: utf-8 -*-
 
 
-import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
@@ -15,22 +14,33 @@ import json
 from transform import *
 
 
-
 class CityScapes(Dataset):
-    def __init__(self, rootpth, cropsize=(640, 480), mode='train', *args, **kwargs):
+    def __init__(self, params, mode='train'):
         super(CityScapes, self).__init__()
-        assert mode in ('train', 'val', 'test')
         self.mode = mode
-        self.ignore_lb = 255
+        self.config_file = params["dataset_config"]["dataset_config_file"]
+        self.ignore_lb = params["dataset_config"]["ignore_idx"]
+        self.rootpth = params["dataset_config"]["dataset_path"]
+        self.cropsize = tuple(params["dataset_config"]["cropsize"])
+        try:
+            assert self.mode in ('train', 'val', 'test')
+        except AssertionError:
+            print(f"[INFO]: Specified {self.mode} mode not in [train, val, test]")
+            raise
+        try:
+            assert os.exists(self.rootpth)
+        except AssertionError:
+            print(f"[INFO]: Specified dataset path {self.rootpth} does not exist!")
+            raise
 
-        with open('./cityscapes_info.json', 'r') as fr:
+        with open(self.config_file, 'r') as fr:
             labels_info = json.load(fr)
         self.lb_map = {el['id']: el['trainId'] for el in labels_info}
 
-        ## parse img directory
+        """ Parse Image Directory """
         self.imgs = {}
         imgnames = []
-        impth = osp.join(rootpth, 'leftImg8bit', mode)
+        impth = osp.join(self.rootpth, 'leftImg8bit', mode)
         folders = os.listdir(impth)
         for fd in folders:
             fdpth = osp.join(impth, fd)
@@ -40,10 +50,10 @@ class CityScapes(Dataset):
             imgnames.extend(names)
             self.imgs.update(dict(zip(names, impths)))
 
-        ## parse gt directory
+        """ Parse GT Directory """
         self.labels = {}
         gtnames = []
-        gtpth = osp.join(rootpth, 'gtFine', mode)
+        gtpth = osp.join(self.rootpth, 'gtFine', mode)
         folders = os.listdir(gtpth)
         for fd in folders:
             fdpth = osp.join(gtpth, fd)
@@ -60,7 +70,7 @@ class CityScapes(Dataset):
         assert set(self.imnames) == set(self.imgs.keys())
         assert set(self.imnames) == set(self.labels.keys())
 
-        ## pre-processing
+        """ Pre-processing and Data Augmentation """
         self.to_tensor = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
@@ -72,7 +82,7 @@ class CityScapes(Dataset):
                 saturation = 0.5),
             HorizontalFlip(),
             RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
-            RandomCrop(cropsize)
+            RandomCrop(self.cropsize)
             ])
 
 

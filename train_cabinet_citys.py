@@ -100,6 +100,9 @@ def train_and_evaluate(params, logger):
 	st = glob_st = time.time()
 	diter = iter(dl)
 	epoch = 0
+	logger.info('\n')
+	logger.info('===='*20)
+	logger.info('[INFO]: Begining Training of Model ...\n')
 	for it in range(max_iter):
 		try:
 			im, lb = next(diter)
@@ -126,7 +129,7 @@ def train_and_evaluate(params, logger):
 		loss_avg.append(loss.item())
 
 		""" Log Values """
-		if (it+1)%msg_iter==0:
+		if (it + 1) % msg_iter==0:
 			loss_avg = sum(loss_avg) / len(loss_avg)
 			lr = optim.lr
 			ed = time.time()
@@ -134,10 +137,10 @@ def train_and_evaluate(params, logger):
 			eta = int((max_iter - it) * (glob_t_intv / it))
 			eta = str(datetime.timedelta(seconds=eta))
 			msg = ', '.join([
-					'it: {it}/{max_it}',
-					'lr: {lr:4f}',
-					'loss: {loss:.4f}',
-					'eta: {eta}',
+					'it: {it}/{max_it} || ',
+					'lr: {lr:4f} || ',
+					'loss: {loss:.4f} || ',
+					'eta: {eta} || ',
 					'time: {time:.4f}',
 				]).format(
 					it = it+1,
@@ -160,7 +163,7 @@ def train_and_evaluate(params, logger):
 			logger.info(f'{it + 1} iterations Finished!; Model Saved to: {save_pth}')
 			current_score = evaluate(params=params, save_pth=save_pth)
 			if current_score > best_score:
-				save_name = params["training_config"]["model_save_name"].split(".pth")[0] + f"_iter_{it + 1}_best_mIOU_{current_score}.pth"
+				save_name = params["training_config"]["model_save_name"].split(".pth")[0] + f"_iter_{it + 1}_best_mIOU_{current_score:.4f}.pth"
 				save_pth = respth / save_name
 				state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
 				if dist.get_rank()==0: torch.save(state, str(save_pth))
