@@ -137,8 +137,6 @@ def evaluate(params, save_pth):
 	""" Setup Logger and Params """
 	setup_logger(params["validation_config"]["validation_output_folder"])
 	logger = logging.getLogger()
-	respth = params["training_config"]["experiments_path"]
-	dspth = params["dataset_config"]["dataset_path"]
 
 	""" Setup Model and Load Saved Weights """
 	logger.info('\n')
@@ -153,7 +151,7 @@ def evaluate(params, save_pth):
 	""" Setup Validation Dataset """
 	batchsize = params["validation_config"]["batch_size"]
 	n_workers = params["training_config"]["num_workers"]
-	dsval = CityScapes(dspth, mode='val')
+	dsval = CityScapes(params, mode='val')
 	dl = DataLoader(dsval,
 					batch_size = batchsize,
 					shuffle = False,

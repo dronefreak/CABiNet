@@ -2,6 +2,7 @@
     "dataset_config":
     {
         "name": "cityscapes",
+        "dataset_config_file": "configs/cityscapes_info.json",
         "num_classes": 19,
         "cropsize": [1024, 1024],
         "dataset_path": "./citys",

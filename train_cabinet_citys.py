@@ -48,7 +48,7 @@ def train_and_evaluate(params, logger):
 	mode = params["training_config"]["mode"]
 
 	""" Prepare DataLoader """
-	ds = CityScapes(dataset_path, cropsize=cropsize, mode=mode)
+	ds = CityScapes(params, mode=mode)
 	sampler = torch.utils.data.distributed.DistributedSampler(ds)
 	dl = DataLoader(ds,
 					batch_size = n_img_per_gpu,
