@@ -11,7 +11,7 @@ import torch.distributed as dist
 
 
 def setup_logger(logpth):
-    logfile = 'DABLNet-{}.log'.format(time.strftime('%Y-%m-%d-%H-%M-%S'))
+    logfile = 'CABiNet-{}.log'.format(time.strftime('%Y-%m-%d-%H-%M-%S'))
     logfile = osp.join(logpth, logfile)
     FORMAT = '%(message)s'
     log_level = logging.INFO
