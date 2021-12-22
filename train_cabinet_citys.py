@@ -7,7 +7,7 @@ from logger import setup_logger
 from cabinet import CABiNet
 from cityscapes import CityScapes
 from loss import OhemCELoss
-from evaluate_cabinet_citys import evaluate
+from evaluate_cabinet_citys import MscEval
 from optimizer import Optimizer
 
 import torch
@@ -44,16 +44,22 @@ def train_and_evaluate(params, logger):
 	n_img_per_gpu = params["training_config"]["batch_size"]
 	n_workers = params["training_config"]["num_workers"]
 	cropsize = params["dataset_config"]["cropsize"]
-	dataset_path = params["dataset_config"]["dataset_path"]
-	mode = params["training_config"]["mode"]
 
 	""" Prepare DataLoader """
-	ds = CityScapes(params, mode=mode)
-	sampler = torch.utils.data.distributed.DistributedSampler(ds)
-	dl = DataLoader(ds,
+	ds_train = CityScapes(params, mode='train')
+	sampler = torch.utils.data.distributed.DistributedSampler(ds_train)
+	dl_train = DataLoader(ds_train,
 					batch_size = n_img_per_gpu,
 					shuffle = False,
 					sampler = sampler,
+					num_workers = n_workers,
+					pin_memory = True,
+					drop_last = True)
+	
+	ds_val = CityScapes(params, mode='val')
+	dl_val = DataLoader(ds_val,
+					batch_size = n_img_per_gpu,
+					shuffle = False,
 					num_workers = n_workers,
 					pin_memory = True,
 					drop_last = True)
@@ -98,7 +104,7 @@ def train_and_evaluate(params, logger):
 	best_score = 0.0
 	loss_avg = []
 	st = glob_st = time.time()
-	diter = iter(dl)
+	diter = iter(dl_train)
 	epoch = 0
 	logger.info('\n')
 	logger.info('===='*20)
@@ -110,7 +116,7 @@ def train_and_evaluate(params, logger):
 		except StopIteration:
 			epoch += 1
 			sampler.set_epoch(epoch)
-			diter = iter(dl)
+			diter = iter(dl_train)
 			im, lb = next(diter)
 		im = im.cuda()
 		lb = lb.cuda()
@@ -161,7 +167,8 @@ def train_and_evaluate(params, logger):
 			state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
 			if dist.get_rank()==0: torch.save(state, str(save_pth))
 			logger.info(f'{it + 1} iterations Finished!; Model Saved to: {save_pth}')
-			current_score = evaluate(params=params, save_pth=save_pth)
+			evaluator = MscEval(net, dl_val, params)
+			current_score = evaluator.evaluate()
 			if current_score > best_score:
 				save_name = params["training_config"]["model_save_name"].split(".pth")[0] + f"_iter_{it + 1}_best_mIOU_{current_score:.4f}.pth"
 				save_pth = respth / save_name
@@ -172,6 +179,7 @@ def train_and_evaluate(params, logger):
 			torch.cuda.synchronize()
 
 	""" Dump and Save the Final Model """
+	print(f"[INFO]: Epochs Completed {epoch}")
 	save_pth = respth / params["training_config"]["model_save_name"]
 	net.cpu()
 	state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
