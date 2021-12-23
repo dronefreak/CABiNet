@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from core.models.cab import ContextAggregationBlock
 from core.models.mobilenetv3 import mobilenetv3_small as MobileNetV3
-
+from pathlib import Path
 
 
 class _DWConv(nn.Module):
@@ -127,8 +127,8 @@ class SpatialBranch(nn.Module):
 	def __init__(self, *args, **kwargs):
 		super(SpatialBranch, self).__init__()
 		self.conv1 = ConvBNReLU(3, 64, kernel_size=7, stride=2, padding=3)
-		self.conv2 = _DWConv(64, 64, kernel_size=3, stride=2, padding=1)
-		self.conv3 = _DWConv(64, 64, kernel_size=3, stride=2, padding=1)
+		self.conv2 = ConvBNReLU(64, 64, kernel_size=3, stride=2, padding=1)
+		self.conv3 = ConvBNReLU(64, 64, kernel_size=3, stride=2, padding=1)
 		self.conv_out = ConvBNReLU(64, 128, kernel_size=1, stride=1, padding=0)
 		self.init_weight()
 
@@ -269,12 +269,12 @@ class AttentionFusion(nn.Module):
 
 
 class CABiNet(nn.Module):
-	def __init__(self, n_classes, *args, **kwargs):
+	def __init__(self, n_classes, backbone_weights=None, *args, **kwargs):
 		super(CABiNet, self).__init__()
-		self.mobile = MobileNetV3(pretrained=True, width_mult=1.)
-		self.ab = AttentionBranch(576, 128, 128, n_classes)
+		self.mobile = MobileNetV3(pretrained=True, width_mult=1., weights=backbone_weights)
+		self.ab = AttentionBranch(576, 256, 256, n_classes)
 		self.sb = SpatialBranch()
-		self.ffm = FeatureFusionModule(256, 256)
+		self.ffm = FeatureFusionModule(384, 256)
 		self.conv_out = CABiNetOutput(256, 256, n_classes)
 		self.init_weight()
 
@@ -315,12 +315,13 @@ class CABiNet(nn.Module):
 
 
 if __name__ == "__main__":
-	net = CABiNet(19)
-	net.cuda()
+	path = Path("core/models/pretrained_backbones")
+	weights_path = (path / "mobilenetv3-small-55df8e1f.pth").resolve()
+	net = CABiNet(19, backbone_weights=weights_path)
 	net.eval()
-	in_ten = torch.randn(1, 3, 2048, 1024).cuda()
+	in_ten = torch.randn(1, 3, 512, 512)
 	start = time.time()
-	out, out1, out2 = net(in_ten)
+	out, out1 = net(in_ten)
 	print(net.mobile.features[:4])
 	end = time.time()
 	print(out.shape)

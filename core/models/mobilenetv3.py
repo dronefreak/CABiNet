@@ -7,6 +7,7 @@ arXiv preprint arXiv:1905.02244.
 import torch
 import torch.nn as nn
 import math
+from pathlib import Path
 
 __all__ = ['mobilenetv3_large', 'mobilenetv3_small']
 
@@ -127,10 +128,12 @@ class InvertedResidual(nn.Module):
 
 
 class MobileNetV3(nn.Module):
-	def __init__(self, cfgs, mode, width_mult=1., pretrained=False):
+	def __init__(self, cfgs, mode, width_mult=1.,
+				 pretrained=False, weights=None):
 		super(MobileNetV3, self).__init__()
 		# setting of inverted residual blocks
 		self.cfgs = cfgs
+		self.weights = weights
 		self.pretrained = pretrained
 		self.width_mult = width_mult
 		assert mode in ['large', 'small']
@@ -180,9 +183,9 @@ class MobileNetV3(nn.Module):
 
 	def _initialize_weights_small(self):
 		if self.width_mult == 0.75: 
-			state_dict = torch.load('pretrained_backbones/mobilenetv3-small-0.75-86c972c3.pth')
+			state_dict = torch.load(str(self.weights))
 		else:
-			state_dict = torch.load('pretrained_backbones/mobilenetv3-small-55df8e1f.pth')
+			state_dict = torch.load(str(self.weights))
 		self_state_dict = self.state_dict()
 		for k, v in state_dict.items():
 			if 'classifier' in k: continue
@@ -192,9 +195,9 @@ class MobileNetV3(nn.Module):
 
 	def _initialize_weights_large(self):
 		if self.width_mult == 0.75: 
-			state_dict = torch.load('pretrained_backbones/mobilenetv3-large-0.75-9632d2a8.pth')
+			state_dict = torch.load(str(self.weights))
 		else:
-			state_dict = torch.load('pretrained_backbones/mobilenetv3-large-1cd25616.pth')
+			state_dict = torch.load(str(self.weights))
 		self_state_dict = self.state_dict()
 		for k, v in state_dict.items():
 			if 'classifier' in k: continue
@@ -229,7 +232,7 @@ class MobileNetV3(nn.Module):
 		return wd_params, nowd_params
 
 
-def mobilenetv3_large(pretrained=False, width_mult=1.):
+def mobilenetv3_large(pretrained=False, width_mult=1., weights=None):
 	"""
 	Constructs a MobileNetV3-Large model
 	"""
@@ -251,10 +254,12 @@ def mobilenetv3_large(pretrained=False, width_mult=1.):
 		[5,   6, 160, 1, 1, 1],
 		[5,   6, 160, 1, 1, 1]
 	]
-	return MobileNetV3(cfgs, mode='large', pretrained=pretrained, width_mult=width_mult)
+	return MobileNetV3(cfgs, mode='large', pretrained=pretrained,
+					   width_mult=width_mult,
+					   weights=weights)
 
 
-def spatial(pretrained=False, width_mult=1.):
+def spatial(pretrained=False, width_mult=1., weights=None):
 	"""
 	Constructs a MobileNetV3-Small model
 	"""
@@ -265,11 +270,13 @@ def spatial(pretrained=False, width_mult=1.):
 		[3, 3.67,  24, 0, 0, 1],
 	]
 
-	return MobileNetV3(cfgs, mode='small', pretrained=pretrained, width_mult=width_mult)
+	return MobileNetV3(cfgs, mode='small', pretrained=pretrained,
+					   width_mult=width_mult,
+					   weights=weights)
 
 
 
-def mobilenetv3_small(pretrained=False, width_mult=1.):
+def mobilenetv3_small(pretrained=False, width_mult=1., weights=None):
 	"""
 	Constructs a MobileNetV3-Small model
 	"""
@@ -288,11 +295,14 @@ def mobilenetv3_small(pretrained=False, width_mult=1.):
 		[5,    6,  96, 1, 1, 1],
 	]
 
-	return MobileNetV3(cfgs, mode='small', pretrained=pretrained, width_mult=width_mult)
+	return MobileNetV3(cfgs, mode='small', pretrained=pretrained,
+					   width_mult=width_mult,
+					   weights=weights)
 
 if __name__=='__main__':
-	model = mobilenetv3_small(pretrained=True, width_mult=1.)
-	model.cuda()
+	path = Path("core/models/pretrained_backbones")
+	weights_path = path / "mobilenetv3-small-55df8e1f.pth"
+	model = mobilenetv3_small(pretrained=True, width_mult=1., weights=weights_path)
 	model.eval()
 	input_size=(1, 3, 2048, 1024)
 	# pip install --upgrade git+https://github.com/kuan-wang/pytorch-OpCounter.git
@@ -302,6 +312,6 @@ if __name__=='__main__':
 	# # print(params)
 	# print('Total params: %.2fM' % (params/1000000.0))
 	# print('Total flops: %.2fM' % (flops/1000000.0))
-	x = torch.randn(input_size).cuda()
+	x = torch.randn(input_size)
 	out = model(x)
 	print(out.shape)
