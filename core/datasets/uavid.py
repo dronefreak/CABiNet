@@ -10,7 +10,6 @@ import os
 from PIL import Image
 import numpy as np
 import json
-import cv2
 from transform import *
 
 
