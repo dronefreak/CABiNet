@@ -23,7 +23,7 @@
         "max_iterations": 120000,
         "msg_iterations": 200,
         "experiments_path": "cabinet_experiments_23122021",
-        "model_save_name": "cabinet_citys_1024x1024.pth"
+        "model_save_name": "cabinet_uavid_1024x1024.pth"
     },
     "validation_config":
     {
