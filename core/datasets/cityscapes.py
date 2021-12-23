@@ -10,7 +10,7 @@ import os
 from PIL import Image
 import numpy as np
 import json
-from transform import *
+from core.datasets.transform import *
 
 
 class CityScapes(Dataset):

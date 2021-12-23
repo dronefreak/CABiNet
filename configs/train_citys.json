@@ -2,10 +2,10 @@
     "dataset_config":
     {
         "name": "cityscapes",
-        "dataset_config_file": "/home/sksglhf/CABiNet/configs/cityscapes_info.json",
+        "dataset_config_file": "/home/saumya.saksena/CABiNet/configs/cityscapes_info.json",
         "num_classes": 19,
         "cropsize": [1024, 1024],
-        "dataset_path": "/home/sksglhf/CABiNet/leftImg8bit_trainvaltest/",
+        "dataset_path": "/home/saumya.saksena/CABiNet/leftImg8bit_trainvaltest/",
         "ignore_idx": 255,
         "shuffle": true
     },
@@ -18,12 +18,12 @@
         "optimizer_weight_decay": 5e-4,
         "optimizer_lr_start": 5e-3,
         "optimizer_power": 0.9,
-        "warmup_stemps": 2000,
+        "warmup_stemps": 4000,
         "warmup_start_lr": 1e-5,
-        "max_iterations": 80000,
-        "msg_iterations": 100,
+        "max_iterations": 200000,
+        "msg_iterations": 200,
         "experiments_path": "cabinet_experiments_23122021",
-        "model_save_name": "cabinet_citys_1024x1024.pth"
+        "model_save_name": "cabinet_uavid_1024x1024.pth"
     },
     "validation_config":
     {

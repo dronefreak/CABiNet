@@ -6,8 +6,8 @@ import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from cab import ContextAggregationBlock
-from mobilenetv3 import mobilenetv3_small as MobileNetV3
+from core.models.cab import ContextAggregationBlock
+from core.models.mobilenetv3 import mobilenetv3_small as MobileNetV3
 
 
 

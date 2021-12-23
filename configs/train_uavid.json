@@ -2,10 +2,10 @@
     "dataset_config":
     {
         "name": "uavid",
-        "dataset_config_file": "/home/sksglhf/CABiNet/configs/UAVid_info.json",
+        "dataset_config_file": "/home/saumya.saksena/CABiNet/configs/UAVid_info.json",
         "num_classes": 8,
         "cropsize": [1024, 1024],
-        "dataset_path": "/home/sksglhf/CABiNet/uavid_v1.5_official_release_image/",
+        "dataset_path": "/home/saumya.saksena/CABiNet/uavid_v1.5_official_release_image/",
         "ignore_idx": 255,
         "shuffle": true
     },
@@ -18,10 +18,10 @@
         "optimizer_weight_decay": 5e-4,
         "optimizer_lr_start": 5e-3,
         "optimizer_power": 0.9,
-        "warmup_stemps": 2000,
+        "warmup_stemps": 3000,
         "warmup_start_lr": 1e-5,
-        "max_iterations": 80000,
-        "msg_iterations": 100,
+        "max_iterations": 120000,
+        "msg_iterations": 200,
         "experiments_path": "cabinet_experiments_23122021",
         "model_save_name": "cabinet_citys_1024x1024.pth"
     },
