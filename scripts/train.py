@@ -68,7 +68,9 @@ def train_and_evaluate(config, logger):
 
 	""" Set Model of CABiNet """
 	ignore_idx = params["dataset_config"]["ignore_idx"]
-	net = CABiNet(n_classes=n_classes)
+	base_path_pretrained = Path("core/models/pretrained_backbones")
+	backbone_weights = (base_path_pretrained / params["training_config"]["backbone_weights"]).resolve()
+	net = CABiNet(n_classes=n_classes, backbone_weights=backbone_weights)
 	net.cuda()
 	net.train()
 	net = nn.parallel.DistributedDataParallel(net,
@@ -209,7 +211,7 @@ if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--config',
 					type=str,
-					default="configs/training_validation_config.json",)
+					default="configs/train_citys.json",)
 	args = parser.parse_args()
 	logger = logging.getLogger()
 	train_and_evaluate(args.config, logger)
