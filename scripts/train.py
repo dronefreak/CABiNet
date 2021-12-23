@@ -2,13 +2,12 @@
 # -*- encoding: utf-8 -*-
 
 
-from logger import setup_logger
-
-from cabinet import CABiNet
-from cityscapes import CityScapes
-from loss import OhemCELoss
-from evaluate_cabinet_citys import MscEval
-from optimizer import Optimizer
+from core.utils.logger import setup_logger
+from core.models.cabinet import CABiNet
+from core.datasets.cityscapes import CityScapes
+from core.utils.loss import OhemCELoss
+from core.utils.optimizer import Optimizer
+from evaluate import MscEval
 
 import torch
 import torch.nn as nn
@@ -22,10 +21,13 @@ import time
 import datetime
 import argparse
 import json
+from shutil import copyfile
 
 
-def train_and_evaluate(params, logger):
+def train_and_evaluate(config, logger):
 	""" Set directories """
+	with open(config, "r") as f:
+		params = json.loads(f.read())
 	respth = Path(params["training_config"]["experiments_path"])
 	Path.mkdir(respth, parents=True, exist_ok=True)
 
@@ -78,7 +80,6 @@ def train_and_evaluate(params, logger):
 	n_min = n_img_per_gpu*cropsize[0]*cropsize[1]//16
 	criteria_p = OhemCELoss(thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx)
 	criteria_16 = OhemCELoss(thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx)
-	criteria_32 = OhemCELoss(thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx)
 
 	""" Set Optimization Parameters """
 	momentum = params["training_config"]["optimizer_momentum"]
@@ -124,11 +125,10 @@ def train_and_evaluate(params, logger):
 		lb = torch.squeeze(lb, 1)
 
 		optim.zero_grad()
-		out, out16, out32 = net(im)
+		out, out16 = net(im)
 		loss1 = criteria_p(out, lb)
 		loss2 = criteria_16(out16, lb)
-		loss3 = criteria_32(out32, lb)
-		loss = loss1 + loss2 + loss3
+		loss = loss1 + loss2
 		loss.backward()
 		optim.step()
 		torch.cuda.synchronize()
@@ -142,7 +142,7 @@ def train_and_evaluate(params, logger):
 			t_intv, glob_t_intv = ed - st, ed - glob_st
 			eta = int((max_iter - it) * (glob_t_intv / it))
 			eta = str(datetime.timedelta(seconds=eta))
-			msg = ', '.join([
+			msg = ''.join([
 					'it: {it}/{max_it} || ',
 					'lr: {lr:4f} || ',
 					'loss: {loss:.4f} || ',
@@ -166,7 +166,7 @@ def train_and_evaluate(params, logger):
 			net.cpu()
 			state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
 			if dist.get_rank()==0: torch.save(state, str(save_pth))
-			logger.info(f'{it + 1} iterations Finished!; Model Saved to: {save_pth}')
+			logger.info(f'[INFO]: {it + 1} iterations Finished!; Model Saved to: {save_pth}')
 			net.cuda()
 			net.eval()
 			torch.cuda.synchronize()
@@ -177,7 +177,10 @@ def train_and_evaluate(params, logger):
 				save_pth = respth / save_name
 				state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
 				if dist.get_rank()==0: torch.save(state, str(save_pth))
+				print(f"[INFO]: mIOU imporved from {best_score:.4f} to {current_score:.4f}")
 				best_score = current_score
+			else:
+				print(f"[INFO]: mIOU did not improve from {best_score:.4f}")
 			net.cuda()
 			net.train()
 			torch.cuda.synchronize()
@@ -191,16 +194,22 @@ def train_and_evaluate(params, logger):
 	logger.info('Training Finished!; Model Saved to: {}'.format(save_pth))
 	torch.cuda.empty_cache()
 
+	""" Save the Config Files with Experiment """
+	config_file_out = respth / config
+	copyfile(config, config_file_out)
+	p = Path(".")
+	file_list = list(p.glob('**/*.py'))
+	for file in file_list:
+		file_out = respth / file
+	copyfile(str(file), str(file_out))
+
 
 if __name__ == "__main__":
 
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--config',
 					type=str,
-					default="training_validation_config.json",)
+					default="configs/training_validation_config.json",)
 	args = parser.parse_args()
-	with open(args.config, "r") as f:
-		params = json.loads(f.read())
 	logger = logging.getLogger()
-
-	train_and_evaluate(params, logger)
+	train_and_evaluate(args.config, logger)

@@ -47,7 +47,8 @@ to_tensor = transforms.Compose([
 image_list = os.listdir(args.data_dir)
 for image in image_list:
     im = to_tensor(Image.open(os.path.join(args.data_dir, image)).convert('RGB')).unsqueeze(0).cuda()
-    out = net(im)[0].argmax(dim=1).squeeze().detach().cpu().numpy()
+    output = net(im)
+    pred = torch.argmax(output[0], 1).squeeze(0).cpu().data.numpy()
     mask = get_color_pallete(out, 'citys')
     save_path = os.path.join(args.save_dir, image)
     #cv2.imwrite(save_path, out)

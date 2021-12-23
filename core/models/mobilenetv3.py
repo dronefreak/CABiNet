@@ -170,15 +170,13 @@ class MobileNetV3(nn.Module):
 	
 
 	def forward(self, x):
-		x_prime = self.input_layer(x)
-		#print(x_prime.shape)
 		x = self.features(x)
 		#print(x.shape)
 		x = self.conv(x)
 		#x = self.avgpool(x)
 		#x = x.view(x.size(0), -1)
 		#x = self.classifier(x)
-		return x#, x_prime
+		return x
 
 	def _initialize_weights_small(self):
 		if self.width_mult == 0.75: 

@@ -1,9 +1,9 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
-from logger import setup_logger
-from cabinet import CABiNet
-from cityscapes import CityScapes
+from core.utils.logger import setup_logger
+from core.models.cabinet import CABiNet
+from core.datasets.cityscapes import CityScapes
 
 import torch
 from torch.utils.data import DataLoader
@@ -129,7 +129,6 @@ class MscEval(object):
 			hist = hist + hist_once
 		IOUs = np.diag(hist) / (np.sum(hist, axis=0)+np.sum(hist, axis=1)-np.diag(hist))
 		mIOU = np.mean(IOUs)
-		print(IOUs)
 		return mIOU
 
 

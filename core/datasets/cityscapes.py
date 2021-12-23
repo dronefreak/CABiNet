@@ -2,7 +2,6 @@
 # -*- encoding: utf-8 -*-
 
 
-import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
@@ -11,43 +10,55 @@ import os
 from PIL import Image
 import numpy as np
 import json
-
 from transform import *
 
-class UAVid(Dataset):
-    def __init__(self, rootpth, cropsize=(640, 480), mode='train', *args, **kwargs):
-        super(UAVid, self).__init__()
-        assert mode in ('train', 'val')
-        self.mode = mode
-        self.ignore_lb = 255
 
-        with open('./UAVid_info.json', 'r') as fr:
+class CityScapes(Dataset):
+    def __init__(self, params, mode='train'):
+        super(CityScapes, self).__init__()
+        self.mode = mode
+        self.config_file = params["dataset_config"]["dataset_config_file"]
+        self.ignore_lb = params["dataset_config"]["ignore_idx"]
+        self.rootpth = params["dataset_config"]["dataset_path"]
+        self.cropsize = tuple(params["dataset_config"]["cropsize"])
+        try:
+            assert self.mode in ('train', 'val', 'test')
+        except AssertionError:
+            print(f"[INFO]: Specified {self.mode} mode not in [train, val, test]")
+            raise
+        try:
+            assert os.path.exists(self.rootpth)
+        except AssertionError:
+            print(f"[INFO]: Specified dataset path {self.rootpth} does not exist!")
+            raise
+
+        with open(self.config_file, 'r') as fr:
             labels_info = json.load(fr)
         self.lb_map = {el['id']: el['trainId'] for el in labels_info}
 
-        ## parse img directory
+        """ Parse Image Directory """
         self.imgs = {}
         imgnames = []
-        impth = osp.join(rootpth, 'leftImg8bit', mode)
+        impth = osp.join(self.rootpth, 'leftImg8bit', self.mode)
         folders = os.listdir(impth)
         for fd in folders:
             fdpth = osp.join(impth, fd)
             im_names = os.listdir(fdpth)
-            names = [el.replace('.png', '') for el in im_names]
+            names = [el.replace('_leftImg8bit.png', '') for el in im_names]
             impths = [osp.join(fdpth, el) for el in im_names]
             imgnames.extend(names)
             self.imgs.update(dict(zip(names, impths)))
 
-        ## parse gt directory
+        """ Parse GT Directory """
         self.labels = {}
         gtnames = []
-        gtpth = osp.join(rootpth, 'gtFine', mode)
+        gtpth = osp.join(self.rootpth, 'gtFine', self.mode)
         folders = os.listdir(gtpth)
         for fd in folders:
             fdpth = osp.join(gtpth, fd)
             lbnames = os.listdir(fdpth)
-            #lbnames = [el for el in lbnames if 'labelIds' in el]
-            names = [el.replace('.png', '') for el in lbnames]
+            lbnames = [el for el in lbnames if 'labelIds' in el]
+            names = [el.replace('_gtFine_labelIds.png', '') for el in lbnames]
             lbpths = [osp.join(fdpth, el) for el in lbnames]
             gtnames.extend(names)
             self.labels.update(dict(zip(names, lbpths)))
@@ -58,7 +69,7 @@ class UAVid(Dataset):
         assert set(self.imnames) == set(self.imgs.keys())
         assert set(self.imnames) == set(self.labels.keys())
 
-        ## pre-processing
+        """ Pre-processing and Data Augmentation """
         self.to_tensor = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
@@ -70,7 +81,7 @@ class UAVid(Dataset):
                 saturation = 0.5),
             HorizontalFlip(),
             RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
-            RandomCrop(cropsize)
+            RandomCrop(self.cropsize)
             ])
 
 
@@ -103,11 +114,12 @@ class UAVid(Dataset):
 
 if __name__ == "__main__":
     from tqdm import tqdm
-    ds = UAVid('./uavid/', n_classes=8, mode='val')
+    with open('../../configs/train_citys.json', "r") as f:
+        params = json.loads(f.read())
+    ds = CityScapes(params, mode='val')
     uni = []
     for im, lb in tqdm(ds):
         lb_uni = np.unique(lb).tolist()
         uni.extend(lb_uni)
-    #print(uni)
     print(set(uni))
 

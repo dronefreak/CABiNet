@@ -160,7 +160,7 @@ class SpatialBranch(nn.Module):
 class FeatureFusionModule(nn.Module):
 	def __init__(self, in_chan, out_chan, *args, **kwargs):
 		super(FeatureFusionModule, self).__init__()
-		self.convblk = _DWConv(in_chan, out_chan, kernel_size=1, stride=1, padding=0)
+		self.convblk = ConvBNReLU(in_chan, out_chan, kernel_size=1, stride=1, padding=0)
 		self.conv1 = nn.Conv2d(out_chan,
 				out_chan//4,
 				kernel_size = 1,
@@ -211,7 +211,7 @@ class FeatureFusionModule(nn.Module):
 class CABiNetOutput(nn.Module):
 	def __init__(self, in_chan, mid_chan, n_classes, *args, **kwargs):
 		super(CABiNetOutput, self).__init__()
-		self.conv = _DSConv(in_chan, mid_chan, kernel_size=3, stride=1, padding=1)
+		self.conv = ConvBNReLU(in_chan, mid_chan, kernel_size=3, stride=1, padding=1)
 		self.conv_out = nn.Conv2d(mid_chan, n_classes, kernel_size=1, bias=False)
 		self.init_weight()
 
@@ -275,7 +275,6 @@ class CABiNet(nn.Module):
 		self.ab = AttentionBranch(576, 128, 128, n_classes)
 		self.sb = SpatialBranch()
 		self.ffm = FeatureFusionModule(256, 256)
-		self.attention_fusion = AttentionFusion(n_classes*2, n_classes)
 		self.conv_out = CABiNetOutput(256, 256, n_classes)
 		self.init_weight()
 
@@ -291,12 +290,10 @@ class CABiNet(nn.Module):
 
 		feat_fuse = self.ffm(feat_sb, feat_ab)
 		feat_out = self.conv_out(feat_fuse)
-		feat_new = self.attention_fusion(feat_out, feat_ab_final)
 
 		feat_out = F.interpolate(feat_out, (H, W), mode='bilinear', align_corners=True)
 		feat_con = F.interpolate(feat_ab_final, (H, W), mode='bilinear', align_corners=True)
-		feat_new = F.interpolate(feat_new, (H, W), mode='bilinear', align_corners=True)
-		return feat_out, feat_new, feat_con
+		return feat_out, feat_con
 
 	def init_weight(self):
 		for ly in self.children():
