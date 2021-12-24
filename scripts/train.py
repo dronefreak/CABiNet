@@ -5,6 +5,7 @@
 from core.utils.logger import setup_logger
 from core.models.cabinet import CABiNet
 from core.datasets.cityscapes import CityScapes
+from core.datasets.uavid import UAVid
 from core.utils.loss import OhemCELoss
 from core.utils.optimizer import Optimizer
 from evaluate import MscEval
@@ -48,23 +49,28 @@ def train_and_evaluate(config, logger):
 	cropsize = params["dataset_config"]["cropsize"]
 
 	""" Prepare DataLoader """
-	ds_train = CityScapes(params, mode='train')
+	if params["dataset_config"]["name"] == "cityscapes":
+		ds_train = CityScapes(params, mode='train')
+		ds_val = CityScapes(params, mode='val')
+	elif params["dataset_config"]["name"] == "uavid":
+		ds_train = UAVid(params, mode='train')
+		ds_val = UAVid(params, mode='val')
+	else:
+		raise NotImplementedError
 	sampler = torch.utils.data.distributed.DistributedSampler(ds_train)
 	dl_train = DataLoader(ds_train,
-					batch_size = n_img_per_gpu,
-					shuffle = False,
-					sampler = sampler,
-					num_workers = n_workers,
-					pin_memory = True,
-					drop_last = True)
-	
-	ds_val = CityScapes(params, mode='val')
+						  batch_size = n_img_per_gpu,
+						  shuffle = False,
+						  sampler = sampler,
+						  num_workers = n_workers,
+						  pin_memory = True,
+						  drop_last = True)
 	dl_val = DataLoader(ds_val,
-					batch_size = n_img_per_gpu,
-					shuffle = False,
-					num_workers = n_workers,
-					pin_memory = True,
-					drop_last = True)
+						batch_size = n_img_per_gpu,
+						shuffle = False,
+						num_workers = n_workers,
+						pin_memory = True,
+						drop_last = True)
 
 	""" Set Model of CABiNet """
 	ignore_idx = params["dataset_config"]["ignore_idx"]
