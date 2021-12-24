@@ -1,16 +1,15 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
-from logger import setup_logger
-from cabinet import CABiNet
-from cityscapes import CityScapes
+from core.utils.logger import setup_logger
+from core.models.cabinet import CABiNet
+from core.datasets.cityscapes import CityScapes
 
 import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import torch.distributed as dist
 
-import os.path as osp
 import logging
 import numpy as np
 from tqdm import tqdm
@@ -22,18 +21,12 @@ class MscEval(object):
 	def __init__(self,
 			model,
 			dataloader,
-			scales = [0.5, 0.75, 1, 1.25, 1.5, 1.75],
-			n_classes = 19,
-			lb_ignore = 255,
-			cropsize = 1024,
-			flip = True,
-			*args, **kwargs):
-		self.scales = scales
-		self.n_classes = n_classes
-		self.lb_ignore = lb_ignore
-		self.flip = flip
-		self.cropsize = cropsize
-		## dataloader
+			params):
+		self.scales = params["validation_config"]["eval_scales"]
+		self.n_classes = params["dataset_config"]["num_classes"]
+		self.lb_ignore = params["dataset_config"]["ignore_idx"]
+		self.flip = params["validation_config"]["flip"]
+		self.cropsize = params["dataset_config"]["cropsize"][0]
 		self.dl = dataloader
 		self.net = model
 
@@ -136,46 +129,44 @@ class MscEval(object):
 			hist = hist + hist_once
 		IOUs = np.diag(hist) / (np.sum(hist, axis=0)+np.sum(hist, axis=1)-np.diag(hist))
 		mIOU = np.mean(IOUs)
-		print(IOUs)
 		return mIOU
 
 
-def evaluate(respth='./trial', dspth='./citys'):
-	## logger
+def evaluate(params, save_pth):
+	""" Setup Logger and Params """
+	setup_logger(params["validation_config"]["validation_output_folder"])
 	logger = logging.getLogger()
 
-	## model
+	""" Setup Model and Load Saved Weights """
 	logger.info('\n')
 	logger.info('===='*20)
-	logger.info('evaluating the model ...\n')
-	logger.info('setup and restore model')
-	n_classes = 19
+	logger.info('[INFO]: Begining Evaluation of Model ...\n')
+	n_classes = params["dataset_config"]["num_classes"]
 	net = CABiNet(n_classes=n_classes)
-	save_pth = osp.join(respth, 'cabinet_citys_1024x1024_resnet.pth')
 	net.load_state_dict(torch.load(save_pth))
 	net.cuda()
 	net.eval()
 
-	## dataset
-	batchsize = 5
-	n_workers = 4
-	dsval = CityScapes(dspth, mode='val')
+	""" Setup Validation Dataset """
+	batchsize = params["validation_config"]["batch_size"]
+	n_workers = params["training_config"]["num_workers"]
+	dsval = CityScapes(params, mode='val')
 	dl = DataLoader(dsval,
 					batch_size = batchsize,
 					shuffle = False,
 					num_workers = n_workers,
 					drop_last = False)
 
-	## evaluator
-	logger.info('compute the mIOU')
-	evaluator = MscEval(net, dl)
+	""" Initialize Evaluator Class """
+	logger.info('[INFO]: Computing mIOU...')
+	evaluator = MscEval(model=net, dataloader=dl, params=params)
 
-	## eval
+	""" Evaluate """
 	mIOU = evaluator.evaluate()
-	logger.info('mIOU is: {:.6f}'.format(mIOU))
-	print(mIOU)
+	logger.info('[INFO]: mIOU is: {:.6f}'.format(mIOU))
+	return mIOU
 
 
 if __name__ == "__main__":
 	setup_logger('./res')
-	evaluate()
+	score = evaluate()

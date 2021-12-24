@@ -6,9 +6,9 @@ import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from cab import ContextAggregationBlock
-from mobilenetv3 import mobilenetv3_small as MobileNetV3
-
+from core.models.cab import ContextAggregationBlock
+from core.models.mobilenetv3 import mobilenetv3_small as MobileNetV3
+from pathlib import Path
 
 
 class _DWConv(nn.Module):
@@ -127,8 +127,8 @@ class SpatialBranch(nn.Module):
 	def __init__(self, *args, **kwargs):
 		super(SpatialBranch, self).__init__()
 		self.conv1 = ConvBNReLU(3, 64, kernel_size=7, stride=2, padding=3)
-		self.conv2 = _DWConv(64, 64, kernel_size=3, stride=2, padding=1)
-		self.conv3 = _DWConv(64, 64, kernel_size=3, stride=2, padding=1)
+		self.conv2 = ConvBNReLU(64, 64, kernel_size=3, stride=2, padding=1)
+		self.conv3 = ConvBNReLU(64, 64, kernel_size=3, stride=2, padding=1)
 		self.conv_out = ConvBNReLU(64, 128, kernel_size=1, stride=1, padding=0)
 		self.init_weight()
 
@@ -160,7 +160,7 @@ class SpatialBranch(nn.Module):
 class FeatureFusionModule(nn.Module):
 	def __init__(self, in_chan, out_chan, *args, **kwargs):
 		super(FeatureFusionModule, self).__init__()
-		self.convblk = _DWConv(in_chan, out_chan, kernel_size=1, stride=1, padding=0)
+		self.convblk = ConvBNReLU(in_chan, out_chan, kernel_size=1, stride=1, padding=0)
 		self.conv1 = nn.Conv2d(out_chan,
 				out_chan//4,
 				kernel_size = 1,
@@ -211,7 +211,7 @@ class FeatureFusionModule(nn.Module):
 class CABiNetOutput(nn.Module):
 	def __init__(self, in_chan, mid_chan, n_classes, *args, **kwargs):
 		super(CABiNetOutput, self).__init__()
-		self.conv = _DSConv(in_chan, mid_chan, kernel_size=3, stride=1, padding=1)
+		self.conv = ConvBNReLU(in_chan, mid_chan, kernel_size=3, stride=1, padding=1)
 		self.conv_out = nn.Conv2d(mid_chan, n_classes, kernel_size=1, bias=False)
 		self.init_weight()
 
@@ -269,13 +269,12 @@ class AttentionFusion(nn.Module):
 
 
 class CABiNet(nn.Module):
-	def __init__(self, n_classes, *args, **kwargs):
+	def __init__(self, n_classes, backbone_weights=None, *args, **kwargs):
 		super(CABiNet, self).__init__()
-		self.mobile = MobileNetV3(pretrained=True, width_mult=1.)
-		self.ab = AttentionBranch(576, 128, 128, n_classes)
+		self.mobile = MobileNetV3(pretrained=True, width_mult=1., weights=backbone_weights)
+		self.ab = AttentionBranch(576, 256, 256, n_classes)
 		self.sb = SpatialBranch()
-		self.ffm = FeatureFusionModule(256, 256)
-		self.attention_fusion = AttentionFusion(n_classes*2, n_classes)
+		self.ffm = FeatureFusionModule(384, 256)
 		self.conv_out = CABiNetOutput(256, 256, n_classes)
 		self.init_weight()
 
@@ -291,12 +290,10 @@ class CABiNet(nn.Module):
 
 		feat_fuse = self.ffm(feat_sb, feat_ab)
 		feat_out = self.conv_out(feat_fuse)
-		feat_new = self.attention_fusion(feat_out, feat_ab_final)
 
 		feat_out = F.interpolate(feat_out, (H, W), mode='bilinear', align_corners=True)
 		feat_con = F.interpolate(feat_ab_final, (H, W), mode='bilinear', align_corners=True)
-		feat_new = F.interpolate(feat_new, (H, W), mode='bilinear', align_corners=True)
-		return feat_out, feat_new, feat_con
+		return feat_out, feat_con
 
 	def init_weight(self):
 		for ly in self.children():
@@ -318,12 +315,13 @@ class CABiNet(nn.Module):
 
 
 if __name__ == "__main__":
-	net = CABiNet(19)
-	net.cuda()
+	path = Path("core/models/pretrained_backbones")
+	weights_path = (path / "mobilenetv3-small-55df8e1f.pth").resolve()
+	net = CABiNet(19, backbone_weights=weights_path)
 	net.eval()
-	in_ten = torch.randn(1, 3, 2048, 1024).cuda()
+	in_ten = torch.randn(1, 3, 512, 512)
 	start = time.time()
-	out, out1, out2 = net(in_ten)
+	out, out1 = net(in_ten)
 	print(net.mobile.features[:4])
 	end = time.time()
 	print(out.shape)

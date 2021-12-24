@@ -20,38 +20,64 @@ Semantic segmentation results on the UAVid (Lyu et al., 2020) validation set sho
 ![title](imgs/uavid_r.jpg)
 
 
+## Setup Requirements
+
+A conda environment file has been provided in this repo, called `cabinet_environment.yml`. So all you need to setup the repo is to run `conda env create -f cabinet_environment.yml` and everything should be okay. This implementation works with PyTorch>1.0.0 (could work with lower versions, but I have not tested them). A more systematic method of setting up the project is given below:
+
+```
+mkdir env/
+conda env create -f cabinet_environment.yml --prefix env/cabinet_environment
+conda activate env/cabinet_environment
+pip3 install -e .
+```
+In the above process we basically use the prefix for this conda environment so that it is local to this repo. Also, since this project is packaged, its advisabele to install it in editable mode via `pip3 install -e .` inside the conda environment.
+
 ## File Description
 
-* `cab.py` - Contains the implementation of context aggregation block, which is a plug-n-play module, can be added to any PyTorch based network.
-* `cabinet.py` - Contains the implementation of the proposed CABiNet model.
-* `cityscapes.py` - CityScapes dataloader which requires `cityscapes_info.json` (contains a general description of valid/invalid classes etc.)
-* `uavid.py` - UAVid dataloader which requires `UAVid_info.json` (contains a general description of valid/invalid classes etc.)
-* `loss.py` - Contains the loss functions for training models.
-* `optimizer.py` - Contains the optimizers for training models.
-* `mobilenetv3.py` - Contains the implementation of the MobileNetV3 backbones (both Large and Small), the pretrained weights for these backbones can be found under `pretrained/` folder of the repo.
-* `transform.py` - Contains data augmentation techniques.
-* `train_cabinet_citys.py` - Training code for CABiNet on CityScapes (a similar one can be used for training the model on UAVid, just by changing the imported libraries and path of the datasets).
-* `training_validation_config.json` - Training and validation config file for CABiNet model. Please use this file to manage input/output directories, dataset paths and other training parameters.
-* `evaluate_cabinet_citys.py` - Evaluation code for trained models, can be used in both multi-scale and single-scale mode.
-* `demo.py` - A small demo code for running trained models on custom images.
+A quick overview of the different files and packages inside this project.
 
-## Requirements
+### Core
 
-A conda environment file has been provided in this repo, called `cabinet_environment.yml`. So all you need to setup the repo is to run `conda env create -f cabinet_environment.yml` and everything should be okay. This implementation works with PyTorch>1.0.0 (could work with lower versions, but I have not tested them).
+Contains model implementations under `models/`, dataloaders under `datasets/` and general project `utils/`.
+
+* `models/cab.py` - Contains the implementation of context aggregation block, which is a plug-n-play module, can be added to any PyTorch based network.
+* `models/cabinet.py` - Contains the implementation of the proposed CABiNet model.
+* `models/mobilenetv3.py` - Contains the implementation of the MobileNetV3 backbones (both Large and Small), the pretrained weights for these backbones can be found under `pretrained/` folder of the repo.
+* `datasets/cityscapes.py` - CityScapes dataloader which requires `cityscapes_info.json` (contains a general description of valid/invalid classes etc.)
+* `datasets/uavid.py` - UAVid dataloader which requires `UAVid_info.json` (contains a general description of valid/invalid classes etc.)
+* `datasets/transform.py` - Contains data augmentation techniques.
+* `utils/loss.py` - Contains the loss functions for training models.
+* `utils/optimizer.py` - Contains the optimizers for training models.
+
+### Scripts
+
+Contains training, validation and demo scripts model analysis.
+
+* `scripts/train.py` - Training code for CABiNet on CityScapes (a similar one can be used for training the model on UAVid, just by changing the imported libraries and path of the datasets).
+* `scripts/evaluate.py` - Evaluation code for trained models, can be used in both multi-scale and single-scale mode.
+* `scripts/demo.py` - A small demo code for running trained models on custom images.
+
+### Configs
+
+* `configs/train_citys.json` - Training and validation config file for CABiNet model on CityScapes dataset. Please use this file to manage input/output directories, dataset paths and other training parameters.
+* `configs/train_uavid.json` - Training and validation config file for CABiNet model on UAVid dataset. Please use this file to manage input/output directories, dataset paths and other training parameters.
+* `configs/cityscapes_info.json` - Valid/invalid label information about CityScapes dataset.
+* `configs/UAVid_info.json` - Valid/invalid label information about UAVid dataset.
 
 ## Training/Evaluation on CityScapes and UAVid
 
 Well the pipeline should be pretty easy, you need to download the CityScapes dataset from [here](https://www.cityscapes-dataset.com/downloads/). Look for `gtFine_trainvaltest.zip (241MB)` for the GT and 
-`leftImg8bit_trainvaltest.zip (11GB)` for the input corresponding RGB images.
+`leftImg8bit_trainvaltest.zip (11GB)` for the input corresponding RGB images. For UAVid you can download the dataset from [here](https://uavid.nl/), under `Downloads`. Once the datasets are downloaded, extract the .zip files and specify the dataset paths in the appropriate config files under `configs/` 
 
-Then simply specify the path for the dataset in the `train_cabinet_citys.py` script alongwith a GPU device number (one on which you plan to run the training) and run `python3 train_cabinet_citys.py --config {config_file}`
-Please note that the dataloader (and also the config file) by default, expects the training data to be under `'./citys/leftImg8bit/train'` and similarly for UAVid `'./uavid/leftImg8bit/train'` and the config file `training_validation_config.json` can be used for launching the trainingand validation of the CABiNet model.
+Then simply run the following commands: 
+```
+export CUDA_VISIBLE_DEVICES=0, # or 1, 2 or 3 (depending upon which device you want to use in case there are multiple.)
+python3 scripts/train.py --config configs/train_citys.json
+```
+
+The train script executes and trains the model, and saves the model weights 10 times during the training, depending upon the best mIOU score obtained on the validation set during training.
 
 __Pre-trained CABiNet models coming soon !!!__
-
-Once you have the trained models, please use `evaluate_cabinet_citys.py` to evaluate the models on the validation sets (as the name indicates, the script works by default with CityScapes, but can be easily modified for UAVid). Please note that this script expects the pre-trained models under `./trial` and dataset under `./citys`.
-
-A small note for UAVid, it might not be very straigtforward to use directly the UAVid dataset, there is a small conversion step in between that allows the dataset to be used by the training and evaluation scripts. The conversion script basically makes the UAVid dataset more like CityScapes in directory structure. I will upload it as soon as I find it.
 
 ## Issues and Pull Requests
 
