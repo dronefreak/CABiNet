@@ -33,12 +33,7 @@ def train_and_evaluate(config, logger):
 	Path.mkdir(respth, parents=True, exist_ok=True)
 
 	torch.cuda.set_device(params["training_config"]["gpu_id"])
-	dist.init_process_group(
-				backend = 'nccl',
-				init_method = 'tcp://127.0.0.1:33271',
-				world_size = torch.cuda.device_count(),
-				rank=params["training_config"]["gpu_id"]
-				)
+	device = torch.device("cuda:{}".format(params["training_config"]["gpu_id"]) if torch.cuda.is_available() else "cpu")
 	setup_logger(respth)
 	torch.cuda.synchronize()
 
@@ -57,11 +52,9 @@ def train_and_evaluate(config, logger):
 		ds_val = UAVid(params, mode='val')
 	else:
 		raise NotImplementedError
-	sampler = torch.utils.data.distributed.DistributedSampler(ds_train)
 	dl_train = DataLoader(ds_train,
 						  batch_size = n_img_per_gpu,
 						  shuffle = False,
-						  sampler = sampler,
 						  num_workers = n_workers,
 						  pin_memory = True,
 						  drop_last = True)
@@ -77,13 +70,8 @@ def train_and_evaluate(config, logger):
 	base_path_pretrained = Path("core/models/pretrained_backbones")
 	backbone_weights = (base_path_pretrained / params["training_config"]["backbone_weights"]).resolve()
 	net = CABiNet(n_classes=n_classes, backbone_weights=backbone_weights)
-	net.cuda()
+	net.to(device)
 	net.train()
-	net = nn.parallel.DistributedDataParallel(net,
-			device_ids=[params["training_config"]["gpu_id"],],
-			output_device=params["training_config"]["gpu_id"],
-			find_unused_parameters=True
-			)
 	score_thres = 0.7
 	n_min = n_img_per_gpu*cropsize[0]*cropsize[1]//16
 	criteria_p = OhemCELoss(thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx)
@@ -124,11 +112,10 @@ def train_and_evaluate(config, logger):
 			if not im.size()[0]==n_img_per_gpu: raise StopIteration
 		except StopIteration:
 			epoch += 1
-			sampler.set_epoch(epoch)
 			diter = iter(dl_train)
 			im, lb = next(diter)
-		im = im.cuda()
-		lb = lb.cuda()
+		im = im.to(device)
+		lb = lb.to(device)
 		H, W = im.size()[2:]
 		lb = torch.squeeze(lb, 1)
 
@@ -173,9 +160,9 @@ def train_and_evaluate(config, logger):
 			save_pth = respth / save_name
 			net.cpu()
 			state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
-			if dist.get_rank()==0: torch.save(state, str(save_pth))
+			torch.save(state, str(save_pth))
 			logger.info(f'[INFO]: {it + 1} iterations Finished!; Model Saved to: {save_pth}')
-			net.cuda()
+			net.to(device)
 			net.eval()
 			torch.cuda.synchronize()
 			evaluator = MscEval(net, dl_val, params)
@@ -184,12 +171,12 @@ def train_and_evaluate(config, logger):
 				save_name = params["training_config"]["model_save_name"].split(".pth")[0] + f"_iter_{it + 1}_best_mIOU_{current_score:.4f}.pth"
 				save_pth = respth / save_name
 				state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
-				if dist.get_rank()==0: torch.save(state, str(save_pth))
+				torch.save(state, str(save_pth))
 				print(f"[INFO]: mIOU imporved from {best_score:.4f} to {current_score:.4f}")
 				best_score = current_score
 			else:
 				print(f"[INFO]: mIOU did not improve from {best_score:.4f}")
-			net.cuda()
+			net.to(device)
 			net.train()
 			torch.cuda.synchronize()
 
@@ -198,7 +185,7 @@ def train_and_evaluate(config, logger):
 	save_pth = respth / params["training_config"]["model_save_name"]
 	net.cpu()
 	state = net.module.state_dict() if hasattr(net, 'module') else net.state_dict()
-	if dist.get_rank()==0: torch.save(state, str(save_pth))
+	torch.save(state, str(save_pth))
 	logger.info('Training Finished!; Model Saved to: {}'.format(save_pth))
 	torch.cuda.empty_cache()
 
