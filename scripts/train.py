@@ -2,58 +2,81 @@
 # -*- encoding: utf-8 -*-
 
 
-from core.utils.logger import setup_logger
-from core.models.cabinet import CABiNet
-from core.datasets.cityscapes import CityScapes
-from core.datasets.uavid import UAVid
-from core.utils.loss import OhemCELoss
-from core.utils.optimizer import Optimizer
-from evaluate import MscEval
-
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.distributed as dist
 
-from pathlib import Path
-import logging
+
 import time
 import datetime
-import argparse
-import json
+import hydra
+from pathlib import Path
 from shutil import copyfile
+from omegaconf import DictConfig, OmegaConf
+from src.utils.logger import setup_logger
+from src.models.cabinet import CABiNet
+from src.datasets.cityscapes import CityScapes
+from src.datasets.uavid import UAVid
+from src.utils.loss import OhemCELoss
+from src.utils.optimizer import Optimizer
+from evaluate import MscEval
 
 
-def train_and_evaluate(config, logger):
-    """Set directories."""
-    with open(config, "r") as f:
-        params = json.loads(f.read())
-    respth = Path(params["training_config"]["experiments_path"])
+@hydra.main(version_base=None, config_path="../configs", config_name="train_citys")
+def train_and_evaluate(cfg: DictConfig) -> None:
+
+    print(OmegaConf.to_yaml(cfg))
+    respth = Path(cfg.training_config.experiments_path)
     Path.mkdir(respth, parents=True, exist_ok=True)
 
-    torch.cuda.set_device(params["training_config"]["gpu_id"])
+    torch.cuda.set_device(cfg.training_config.gpu_id)
     dist.init_process_group(
         backend="nccl",
         init_method="tcp://127.0.0.1:33271",
         world_size=torch.cuda.device_count(),
-        rank=params["training_config"]["gpu_id"],
+        rank=cfg.training_config.gpu_id,
     )
     setup_logger(respth)
     torch.cuda.synchronize()
 
     """ Set Dataset Params """
-    n_classes = params["dataset_config"]["num_classes"]
-    n_img_per_gpu = params["training_config"]["batch_size"]
-    n_workers = params["training_config"]["num_workers"]
-    cropsize = params["dataset_config"]["cropsize"]
+    n_classes = cfg.dataset_config.num_classes
+    n_img_per_gpu = cfg.training_config.batch_size
+    n_workers = cfg.training_config.num_workers
+    cropsize = cfg.dataset_config.cropsize
 
     """ Prepare DataLoader """
-    if params["dataset_config"]["name"] == "cityscapes":
-        ds_train = CityScapes(params, mode="train")
-        ds_val = CityScapes(params, mode="val")
-    elif params["dataset_config"]["name"] == "uavid":
-        ds_train = UAVid(params, mode="train")
-        ds_val = UAVid(params, mode="val")
+    if cfg.dataset_config.name == "cityscapes":
+        ds_train = CityScapes(
+            config=cfg.dataset_config.num_classes,
+            ignore_lb=cfg.dataset_config.ignore_lb,
+            rootpth=cfg.dataset_config.dataset_path,
+            cropsize=cfg.dataset_config.cropsize,
+            mode="train",
+        )
+        ds_val = CityScapes(
+            config=cfg.dataset_config.num_classes,
+            ignore_lb=cfg.dataset_config.ignore_lb,
+            rootpth=cfg.dataset_config.dataset_path,
+            cropsize=cfg.dataset_config.cropsize,
+            mode="val",
+        )
+    elif cfg.dataset_config.name == "uavid":
+        ds_train = UAVid(
+            config=cfg.dataset_config.num_classes,
+            ignore_lb=cfg.dataset_config.ignore_lb,
+            rootpth=cfg.dataset_config.dataset_path,
+            cropsize=cfg.dataset_config.cropsize,
+            mode="train",
+        )
+        ds_val = UAVid(
+            config=cfg.dataset_config.num_classes,
+            ignore_lb=cfg.dataset_config.ignore_lb,
+            rootpth=cfg.dataset_config.dataset_path,
+            cropsize=cfg.dataset_config.cropsize,
+            mode="val",
+        )
     else:
         raise NotImplementedError
     sampler = torch.utils.data.distributed.DistributedSampler(ds_train)
@@ -76,10 +99,10 @@ def train_and_evaluate(config, logger):
     )
 
     """ Set Model of CABiNet """
-    ignore_idx = params["dataset_config"]["ignore_idx"]
+    ignore_idx = cfg.dataset_config.ignore_idx
     base_path_pretrained = Path("core/models/pretrained_backbones")
     backbone_weights = (
-        base_path_pretrained / params["training_config"]["backbone_weights"]
+        base_path_pretrained / cfg.training_config.backbone_weights
     ).resolve()
     net = CABiNet(n_classes=n_classes, backbone_weights=backbone_weights)
     net.cuda()
@@ -87,9 +110,9 @@ def train_and_evaluate(config, logger):
     net = nn.parallel.DistributedDataParallel(
         net,
         device_ids=[
-            params["training_config"]["gpu_id"],
+            cfg.training_config.gpu_id,
         ],
-        output_device=params["training_config"]["gpu_id"],
+        output_device=cfg.training_config.gpu_id,
         find_unused_parameters=True,
     )
     score_thres = 0.7
@@ -98,13 +121,13 @@ def train_and_evaluate(config, logger):
     criteria_16 = OhemCELoss(thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx)
 
     """ Set Optimization Parameters """
-    momentum = params["training_config"]["optimizer_momentum"]
-    weight_decay = params["training_config"]["optimizer_weight_decay"]
-    lr_start = params["training_config"]["optimizer_lr_start"]
-    max_iter = params["training_config"]["max_iterations"]
-    power = params["training_config"]["optimizer_power"]
-    warmup_steps = params["training_config"]["warmup_stemps"]
-    warmup_start_lr = params["training_config"]["warmup_start_lr"]
+    momentum = cfg.training_config.optimizer_momentum
+    weight_decay = cfg.training_config.optimizer_weight_decay
+    lr_start = cfg.training_config.optimizer_lr_start
+    max_iter = cfg.training_config.max_iterations
+    power = cfg.training_config.optimizer_power
+    warmup_steps = cfg.training_config.warmup_stemps
+    warmup_start_lr = cfg.training_config.warmup_start_lr
     optim = Optimizer(
         model=net.module,
         lr0=lr_start,
@@ -117,8 +140,8 @@ def train_and_evaluate(config, logger):
     )
 
     """ Set Train Loop Params """
-    msg_iter = params["training_config"]["msg_iterations"]
-    save_steps = int(params["training_config"]["max_iterations"] / 10)
+    msg_iter = cfg.training_config.msg_iterations
+    save_steps = int(cfg.training_config.max_iterations / 10)
     best_score = 0.0
     loss_avg = []
     st = glob_st = time.time()
@@ -177,7 +200,7 @@ def train_and_evaluate(config, logger):
 
         if (it + 1) % save_steps == 0:
             save_name = (
-                params["training_config"]["model_save_name"].split(".pth")[0]
+                cfg.training_config.model_save_name.split(".pth")[0]
                 + f"_iter_{it + 1}.pth"
             )
             save_pth = respth / save_name
@@ -197,7 +220,7 @@ def train_and_evaluate(config, logger):
             current_score = evaluator.evaluate()
             if current_score > best_score:
                 save_name = (
-                    params["training_config"]["model_save_name"].split(".pth")[0]
+                    cfg.training_config.model_save_name.split(".pth")[0]
                     + f"_iter_{it + 1}_best_mIOU_{current_score:.4f}.pth"
                 )
                 save_pth = respth / save_name
@@ -221,7 +244,7 @@ def train_and_evaluate(config, logger):
 
     """ Dump and Save the Final Model """
     print(f"[INFO]: Epochs Completed {epoch}")
-    save_pth = respth / params["training_config"]["model_save_name"]
+    save_pth = respth / cfg.training_config.model_save_name
     net.cpu()
     state = net.module.state_dict() if hasattr(net, "module") else net.state_dict()
     if dist.get_rank() == 0:
@@ -240,13 +263,4 @@ def train_and_evaluate(config, logger):
 
 
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="configs/train_citys.json",
-    )
-    args = parser.parse_args()
-    logger = logging.getLogger()
-    train_and_evaluate(args.config, logger)
+    train_and_evaluate()
