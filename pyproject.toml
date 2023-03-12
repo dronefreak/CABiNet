@@ -1,0 +1,3 @@
+[tool.black]
+experimental_string_processing = true
+line-length = 88
