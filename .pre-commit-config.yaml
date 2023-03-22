@@ -19,4 +19,4 @@ repos:
     rev: v2.7.1
     hooks:
       - id: prettier
-        types: [yaml]
+        types: [yaml, json]
