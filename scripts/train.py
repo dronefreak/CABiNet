@@ -30,15 +30,15 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     respth = Path(cfg.training_config.experiments_path)
     Path.mkdir(respth, parents=True, exist_ok=True)
 
-    torch.cuda.set_device(cfg.training_config.gpu_id)
-    dist.init_process_group(
-        backend="nccl",
-        init_method="tcp://127.0.0.1:33271",
-        world_size=torch.cuda.device_count(),
-        rank=cfg.training_config.gpu_id,
-    )
-    setup_logger(respth)
-    torch.cuda.synchronize()
+    # torch.cuda.set_device(cfg.training_config.gpu_id)
+    # dist.init_process_group(
+    #     backend="nccl",
+    #     init_method="tcp://127.0.0.1:33271",
+    #     world_size=cfg.training_config.gpu_id,
+    #     rank=cfg.training_config.gpu_id,
+    # )
+    # setup_logger(respth)
+    # torch.cuda.synchronize()
 
     """ Set Dataset Params """
     n_classes = cfg.dataset_config.num_classes
@@ -47,44 +47,46 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     cropsize = cfg.dataset_config.cropsize
 
     """ Prepare DataLoader """
+    print("Preparing dataloaders!")
     if cfg.dataset_config.name == "cityscapes":
         ds_train = CityScapes(
-            config=cfg.dataset_config.num_classes,
-            ignore_lb=cfg.dataset_config.ignore_lb,
+            config_file=cfg.dataset_config.dataset_config_file,
+            ignore_lb=cfg.dataset_config.ignore_idx,
             rootpth=cfg.dataset_config.dataset_path,
             cropsize=cfg.dataset_config.cropsize,
             mode="train",
         )
         ds_val = CityScapes(
-            config=cfg.dataset_config.num_classes,
-            ignore_lb=cfg.dataset_config.ignore_lb,
+            config_file=cfg.dataset_config.dataset_config_file,
+            ignore_lb=cfg.dataset_config.ignore_idx,
             rootpth=cfg.dataset_config.dataset_path,
             cropsize=cfg.dataset_config.cropsize,
             mode="val",
         )
     elif cfg.dataset_config.name == "uavid":
         ds_train = UAVid(
-            config=cfg.dataset_config.num_classes,
-            ignore_lb=cfg.dataset_config.ignore_lb,
+            config_file=cfg.dataset_config.dataset_config_file,
+            ignore_lb=cfg.dataset_config.ignore_idx,
             rootpth=cfg.dataset_config.dataset_path,
             cropsize=cfg.dataset_config.cropsize,
             mode="train",
         )
         ds_val = UAVid(
-            config=cfg.dataset_config.num_classes,
-            ignore_lb=cfg.dataset_config.ignore_lb,
+            config_file=cfg.dataset_config.dataset_config_file,
+            ignore_lb=cfg.dataset_config.ignore_idx,
             rootpth=cfg.dataset_config.dataset_path,
             cropsize=cfg.dataset_config.cropsize,
             mode="val",
         )
     else:
         raise NotImplementedError
-    sampler = torch.utils.data.distributed.DistributedSampler(ds_train)
+    # sampler = torch.utils.data.distributed.DistributedSampler(ds_train)
+    print("Prepared dataloaders!")
     dl_train = DataLoader(
         ds_train,
         batch_size=n_img_per_gpu,
         shuffle=False,
-        sampler=sampler,
+        # sampler=sampler,
         num_workers=n_workers,
         pin_memory=True,
         drop_last=True,
@@ -100,21 +102,21 @@ def train_and_evaluate(cfg: DictConfig) -> None:
 
     """ Set Model of CABiNet """
     ignore_idx = cfg.dataset_config.ignore_idx
-    base_path_pretrained = Path("core/models/pretrained_backbones")
+    base_path_pretrained = Path("src/models/pretrained_backbones")
     backbone_weights = (
         base_path_pretrained / cfg.training_config.backbone_weights
     ).resolve()
     net = CABiNet(n_classes=n_classes, backbone_weights=backbone_weights)
     net.cuda()
     net.train()
-    net = nn.parallel.DistributedDataParallel(
-        net,
-        device_ids=[
-            cfg.training_config.gpu_id,
-        ],
-        output_device=cfg.training_config.gpu_id,
-        find_unused_parameters=True,
-    )
+    # net = nn.parallel.DistributedDataParallel(
+    #     net,
+    #     device_ids=[
+    #         cfg.training_config.gpu_id,
+    #     ],
+    #     output_device=cfg.training_config.gpu_id,
+    #     find_unused_parameters=True,
+    # )
     score_thres = 0.7
     n_min = n_img_per_gpu * cropsize[0] * cropsize[1] // 16
     criteria_p = OhemCELoss(thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx)
@@ -129,7 +131,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     warmup_steps = cfg.training_config.warmup_stemps
     warmup_start_lr = cfg.training_config.warmup_start_lr
     optim = Optimizer(
-        model=net.module,
+        model=net,
         lr0=lr_start,
         momentum=momentum,
         wd=weight_decay,
@@ -147,17 +149,18 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     st = glob_st = time.time()
     diter = iter(dl_train)
     epoch = 0
-    logger.info("\n")
-    logger.info("====" * 20)
-    logger.info("[INFO]: Begining Training of Model ...\n")
+    # logger.info("\n")
+    # logger.info("====" * 20)
+    print("[INFO]: Begining Training of Model ...\n")
     for it in range(max_iter):
         try:
             im, lb = next(diter)
+            # print("stage 1")
             if not im.size()[0] == n_img_per_gpu:
                 raise StopIteration
         except StopIteration:
             epoch += 1
-            sampler.set_epoch(epoch)
+            # sampler.set_epoch(epoch)
             diter = iter(dl_train)
             im, lb = next(diter)
         im = im.cuda()
@@ -174,6 +177,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         optim.step()
         torch.cuda.synchronize()
         loss_avg.append(loss.item())
+        # print("stage 2")
 
         """ Log Values """
         if (it + 1) % msg_iter == 0:
@@ -194,7 +198,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
             ).format(
                 it=it + 1, max_it=max_iter, lr=lr, loss=loss_avg, time=t_intv, eta=eta
             )
-            logger.info(msg)
+            print(msg)
             loss_avg = []
             st = ed
 
@@ -210,9 +214,9 @@ def train_and_evaluate(cfg: DictConfig) -> None:
             )
             if dist.get_rank() == 0:
                 torch.save(state, str(save_pth))
-            logger.info(
-                f"[INFO]: {it + 1} iterations Finished!; Model Saved to: {save_pth}"
-            )
+            # logger.info(
+            #     f"[INFO]: {it + 1} iterations Finished!; Model Saved to: {save_pth}"
+            # )
             net.cuda()
             net.eval()
             torch.cuda.synchronize()
