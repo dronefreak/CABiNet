@@ -1,3 +1,6 @@
+# using default_language_version
+default_language_version:
+    node: 16.14.2
 repos:
   - repo: https://github.com/ambv/black
     rev: 22.3.0
