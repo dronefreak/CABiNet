@@ -1,44 +1,27 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
-
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
-import torch.distributed as dist
-
-
-import time
-import datetime
 import hydra
+from tqdm import tqdm
 from pathlib import Path
-from shutil import copyfile
 from omegaconf import DictConfig, OmegaConf
-from src.utils.logger import setup_logger
 from src.models.cabinet import CABiNet
 from src.datasets.cityscapes import CityScapes
 from src.datasets.uavid import UAVid
 from src.utils.loss import OhemCELoss
 from src.utils.optimizer import Optimizer
-from evaluate import MscEval
+from src.utils.logger import get_rich_console
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="train_citys")
 def train_and_evaluate(cfg: DictConfig) -> None:
 
-    print(OmegaConf.to_yaml(cfg))
+    console = get_rich_console()
+    console.print(OmegaConf.to_yaml(cfg), style="warning")
     respth = Path(cfg.training_config.experiments_path)
     Path.mkdir(respth, parents=True, exist_ok=True)
-
-    # torch.cuda.set_device(cfg.training_config.gpu_id)
-    # dist.init_process_group(
-    #     backend="nccl",
-    #     init_method="tcp://127.0.0.1:33271",
-    #     world_size=cfg.training_config.gpu_id,
-    #     rank=cfg.training_config.gpu_id,
-    # )
-    # setup_logger(respth)
-    # torch.cuda.synchronize()
 
     """ Set Dataset Params """
     n_classes = cfg.dataset_config.num_classes
@@ -47,7 +30,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     cropsize = cfg.dataset_config.cropsize
 
     """ Prepare DataLoader """
-    print("Preparing dataloaders!")
+    console.print("Preparing dataloaders!", style="info")
     if cfg.dataset_config.name == "cityscapes":
         ds_train = CityScapes(
             config_file=cfg.dataset_config.dataset_config_file,
@@ -80,13 +63,10 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         )
     else:
         raise NotImplementedError
-    # sampler = torch.utils.data.distributed.DistributedSampler(ds_train)
-    print("Prepared dataloaders!")
     dl_train = DataLoader(
         ds_train,
         batch_size=n_img_per_gpu,
-        shuffle=False,
-        # sampler=sampler,
+        shuffle=True,
         num_workers=n_workers,
         pin_memory=True,
         drop_last=True,
@@ -94,11 +74,12 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     dl_val = DataLoader(
         ds_val,
         batch_size=n_img_per_gpu,
-        shuffle=False,
+        shuffle=True,
         num_workers=n_workers,
         pin_memory=True,
         drop_last=True,
     )
+    console.log("Dataset ready!", style="info")
 
     """ Set Model of CABiNet """
     ignore_idx = cfg.dataset_config.ignore_idx
@@ -109,14 +90,9 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     net = CABiNet(n_classes=n_classes, backbone_weights=backbone_weights)
     net.cuda()
     net.train()
-    # net = nn.parallel.DistributedDataParallel(
-    #     net,
-    #     device_ids=[
-    #         cfg.training_config.gpu_id,
-    #     ],
-    #     output_device=cfg.training_config.gpu_id,
-    #     find_unused_parameters=True,
-    # )
+    console.log("Model ready!", style="info")
+
+    # Set loss functions
     score_thres = 0.7
     n_min = n_img_per_gpu * cropsize[0] * cropsize[1] // 16
     criteria_p = OhemCELoss(thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx)
@@ -142,30 +118,13 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     )
 
     """ Set Train Loop Params """
-    msg_iter = cfg.training_config.msg_iterations
-    save_steps = int(cfg.training_config.max_iterations / 10)
-    best_score = 0.0
-    loss_avg = []
-    st = glob_st = time.time()
-    diter = iter(dl_train)
+    epochs = cfg.training_config.epochs
     epoch = 0
-    # logger.info("\n")
-    # logger.info("====" * 20)
-    print("[INFO]: Begining Training of Model ...\n")
-    for it in range(max_iter):
-        try:
-            im, lb = next(diter)
-            # print("stage 1")
-            if not im.size()[0] == n_img_per_gpu:
-                raise StopIteration
-        except StopIteration:
-            epoch += 1
-            # sampler.set_epoch(epoch)
-            diter = iter(dl_train)
-            im, lb = next(diter)
+    best_loss = float("inf")
+
+    def train_step(im, lb):
         im = im.cuda()
         lb = lb.cuda()
-        H, W = im.size()[2:]
         lb = torch.squeeze(lb, 1)
 
         optim.zero_grad()
@@ -176,94 +135,96 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         loss.backward()
         optim.step()
         torch.cuda.synchronize()
-        loss_avg.append(loss.item())
-        # print("stage 2")
 
-        """ Log Values """
-        if (it + 1) % msg_iter == 0:
-            loss_avg = sum(loss_avg) / len(loss_avg)
-            lr = optim.lr
-            ed = time.time()
-            t_intv, glob_t_intv = ed - st, ed - glob_st
-            eta = int((max_iter - it) * (glob_t_intv / it))
-            eta = str(datetime.timedelta(seconds=eta))
-            msg = "".join(
-                [
-                    "it: {it}/{max_it} || ",
-                    "lr: {lr:4f} || ",
-                    "loss: {loss:.4f} || ",
-                    "eta: {eta} || ",
-                    "time: {time:.4f}",
-                ]
-            ).format(
-                it=it + 1, max_it=max_iter, lr=lr, loss=loss_avg, time=t_intv, eta=eta
+        step_logs = {}
+        step_logs["loss"] = loss.item()
+        return step_logs
+
+    def val_step(im, lb):
+        im = im.cuda()
+        lb = lb.cuda()
+        lb = torch.squeeze(lb, 1)
+
+        out, out16 = net(im)
+        loss1 = criteria_p(out, lb)
+        loss2 = criteria_16(out16, lb)
+        loss = loss1 + loss2
+
+        step_logs = {}
+        step_logs["loss"] = loss.item()
+        return step_logs
+
+    console.rule("Begining training ...")
+    for epoch in range(epochs):
+        step_count = 0
+        torch.cuda.empty_cache()
+        train_dataloader_loop = tqdm(dl_train)
+        train_logs = {}
+        train_logs["loss"] = 0
+        net.cuda()
+        net.train()
+        for im, lb in train_dataloader_loop:
+            step_logs = train_step(im, lb)
+            step_count += 1
+            train_logs["loss"] = step_count / (step_count + 1) * train_logs[
+                "loss"
+            ] + step_logs["loss"] / (step_count + 1)
+
+            train_dataloader_loop.set_description(f"Epoch [{epoch}/{epochs}]")
+            train_dataloader_loop.set_postfix(loss=train_logs["loss"])
+
+        step_count = 0
+        torch.cuda.empty_cache()
+        val_dataloader_loop = tqdm(dl_val)
+        val_logs = {}
+        val_logs["loss"] = 0
+        net.eval()
+        for im, lb in val_dataloader_loop:
+            val_step_logs = val_step(im, lb)
+            step_count += 1
+            val_logs["loss"] = step_count / (step_count + 1) * val_logs[
+                "loss"
+            ] + val_step_logs["loss"] / (step_count + 1)
+
+            val_dataloader_loop.set_description("Val Step!")
+            val_dataloader_loop.set_postfix(val_loss=val_logs["loss"])
+
+        if val_logs["loss"] < best_loss:
+            console.print(
+                f"Val loss improved from {best_loss:.4f} to {val_logs['loss']:.4f}!"
             )
-            print(msg)
-            loss_avg = []
-            st = ed
-
-        if (it + 1) % save_steps == 0:
+            best_loss = val_logs["loss"]
             save_name = (
-                cfg.training_config.model_save_name.split(".pth")[0]
-                + f"_iter_{it + 1}.pth"
+                cfg.training_config.model_save_name.split(".pth")[0] + "_best_model.pth"
             )
             save_pth = respth / save_name
+            console.print(f"Saving model to {str(save_pth)}!")
             net.cpu()
             state = (
                 net.module.state_dict() if hasattr(net, "module") else net.state_dict()
             )
-            if dist.get_rank() == 0:
-                torch.save(state, str(save_pth))
-            # logger.info(
-            #     f"[INFO]: {it + 1} iterations Finished!; Model Saved to: {save_pth}"
-            # )
-            net.cuda()
-            net.eval()
-            torch.cuda.synchronize()
-            evaluator = MscEval(net, dl_val, params)
-            current_score = evaluator.evaluate()
-            if current_score > best_score:
-                save_name = (
-                    cfg.training_config.model_save_name.split(".pth")[0]
-                    + f"_iter_{it + 1}_best_mIOU_{current_score:.4f}.pth"
-                )
-                save_pth = respth / save_name
-                state = (
-                    net.module.state_dict()
-                    if hasattr(net, "module")
-                    else net.state_dict()
-                )
-                if dist.get_rank() == 0:
-                    torch.save(state, str(save_pth))
-                print(
-                    f"[INFO]: mIOU imporved from {best_score:.4f} to"
-                    f" {current_score:.4f}"
-                )
-                best_score = current_score
-            else:
-                print(f"[INFO]: mIOU did not improve from {best_score:.4f}")
-            net.cuda()
-            net.train()
-            torch.cuda.synchronize()
+            torch.save(state, str(save_pth))
+
+        """ Log Values """
 
     """ Dump and Save the Final Model """
-    print(f"[INFO]: Epochs Completed {epoch}")
+    console.rule("Training finished!")
+    console.print(f"[INFO]: Epochs Completed {epoch + 1}")
     save_pth = respth / cfg.training_config.model_save_name
     net.cpu()
     state = net.module.state_dict() if hasattr(net, "module") else net.state_dict()
-    if dist.get_rank() == 0:
-        torch.save(state, str(save_pth))
-    logger.info("Training Finished!; Model Saved to: {}".format(save_pth))
+    torch.save(state, str(save_pth))
+    # logger.info("Training Finished!; Model Saved to: {}".format(save_pth))
     torch.cuda.empty_cache()
 
     """ Save the Config Files with Experiment """
-    config_file_out = respth / config
-    copyfile(config, config_file_out)
-    p = Path(".")
-    file_list = list(p.glob("**/*.py"))
-    for file in file_list:
-        file_out = respth / file
-    copyfile(str(file), str(file_out))
+    # config_file_out = respth / config
+    # copyfile(config, config_file_out)
+    # p = Path(".")
+    # file_list = list(p.glob("**/*.py"))
+    # for file in file_list:
+    #     file_out = respth / file
+    # copyfile(str(file), str(file_out))
 
 
 if __name__ == "__main__":

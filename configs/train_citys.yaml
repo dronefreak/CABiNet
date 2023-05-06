@@ -1,16 +1,17 @@
 dataset_config:
   name: cityscapes
-  dataset_config_file: ${hydra:runtime.cwd}/configs/cityscapes_info.json
+  dataset_config_file: /data/saumya/CABiNet/configs/cityscapes_info.json
   num_classes: 19
   cropsize: [1024, 1024]
-  dataset_path: ${hydra:runtime.cwd}/leftImg8bit_trainvaltest/
+  dataset_path: /data/saumya/CABiNet/leftImg8bit_trainvaltest/
   ignore_idx: 255
   shuffle: true
 
 training_config:
-  batch_size: 12
-  num_workers: 6
+  batch_size: 8
+  num_workers: 16
   gpu_id: 0
+  epochs: 500
   optimizer_momentum: 0.9
   optimizer_weight_decay: 5e-4
   optimizer_lr_start: 5e-3
@@ -18,7 +19,7 @@ training_config:
   warmup_stemps: 4000
   warmup_start_lr: 1e-5
   max_iterations: 200000
-  msg_iterations: 200
+  msg_iterations: 20
   experiments_path: cabinet_experiments_23122021
   model_save_name: cabinet_citys_1024x1024.pth
   backbone_weights: mobilenetv3-small-55df8e1f.pth
