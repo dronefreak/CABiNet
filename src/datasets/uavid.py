@@ -122,7 +122,13 @@ if __name__ == "__main__":
 
     with open("../../configs/train_uavid.json", "r") as f:
         params = json.loads(f.read())
-    ds = UAVid(params, mode="val")
+    ds = UAVid(
+        config_file="/data/saumya/CABiNet/configs/UAVid_info.json",
+        ignore_lb=0,
+        rootpth="/data/saumya/CABiNet/uavid_v1.5_official_release_image",
+        cropsize=(1024, 1024),
+        mode="val",
+    )
     uni = []
     for im, lb in tqdm(ds):
         lb_uni = np.unique(lb).tolist()
