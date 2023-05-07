@@ -68,3 +68,4 @@ dependencies:
   - zstd=1.4.9=haebb681_0
   - pip:
     - torchsummary==1.5.1
+    - rich==13.3.5
