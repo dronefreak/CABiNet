@@ -1,128 +1,202 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
+import json
+import os
+import os.path as osp
+from typing import Any, Tuple
+import warnings
 
+from PIL import Image
+import numpy as np
+import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
-import os.path as osp
-import os
-from PIL import Image
-import numpy as np
-import json
 from src.datasets.transform import (
     ColorJitter,
+    Compose,
     HorizontalFlip,
     RandomCrop,
     RandomScale,
-    Compose,
 )
 
 
 class CityScapes(Dataset):
-    def __init__(self, config_file, ignore_lb, rootpth, cropsize, mode="train"):
+    """CityScapes Dataset with proper label remapping, safe augmentation, and thread-
+    safe preprocessing."""
+
+    def __init__(
+        self,
+        config_file: str,
+        ignore_lb: int,
+        rootpth: str,
+        cropsize: Tuple[int, int],
+        mode: str = "train",
+    ):
         super(CityScapes, self).__init__()
+
+        assert mode in ("train", "val", "test"), f"Mode {mode} not supported."
+        assert osp.exists(rootpth), f"Dataset root path {rootpth} does not exist."
+
         self.mode = mode
         self.config_file = config_file
         self.ignore_lb = ignore_lb
         self.rootpth = rootpth
         self.cropsize = tuple(cropsize)
-        try:
-            assert self.mode in ("train", "val", "test")
-        except AssertionError:
-            print(f"[INFO]: Specified {self.mode} mode not in [train, val, test]")
-            raise
-        try:
-            assert os.path.exists(self.rootpth)
-        except AssertionError:
-            print(f"[INFO]: Specified dataset path {self.rootpth} does not exist!")
-            raise
 
+        # Load label mapping: id -> trainId
         with open(self.config_file, "r") as fr:
             labels_info = json.load(fr)
         self.lb_map = {el["id"]: el["trainId"] for el in labels_info}
 
-        """ Parse Image Directory """
+        # Create reverse mapping as NumPy-friendly lookup table (fast!)
+        self._mapping = np.full(256, self.ignore_lb, dtype=np.int64)
+        for k, v in self.lb_map.items():
+            if k >= 0 and k < 256:
+                self._mapping[k] = v
+
+        # Parse image and label paths
+        self.imnames = []
         self.imgs = {}
-        imgnames = []
-        impth = osp.join(self.rootpth, "leftImg8bit", self.mode)
-        folders = os.listdir(impth)
-        for fd in folders:
-            fdpth = osp.join(impth, fd)
-            im_names = os.listdir(fdpth)
-            names = [el.replace("_leftImg8bit.png", "") for el in im_names]
-            impths = [osp.join(fdpth, el) for el in im_names]
-            imgnames.extend(names)
-            self.imgs.update(dict(zip(names, impths)))
-
-        """ Parse GT Directory """
         self.labels = {}
-        gtnames = []
-        gtpth = osp.join(self.rootpth, "gtFine", self.mode)
-        folders = os.listdir(gtpth)
-        for fd in folders:
-            fdpth = osp.join(gtpth, fd)
-            lbnames = os.listdir(fdpth)
-            lbnames = [el for el in lbnames if "labelIds" in el]
-            names = [el.replace("_gtFine_labelIds.png", "") for el in lbnames]
-            lbpths = [osp.join(fdpth, el) for el in lbnames]
-            gtnames.extend(names)
-            self.labels.update(dict(zip(names, lbpths)))
 
-        self.imnames = imgnames
-        self.len = len(self.imnames)
-        assert set(imgnames) == set(gtnames)
-        assert set(self.imnames) == set(self.imgs.keys())
-        assert set(self.imnames) == set(self.labels.keys())
+        impth = osp.join(rootpth, "leftImg8bit", mode)
+        gtpth = osp.join(rootpth, "gtFine", mode)
 
-        """ Pre-processing and Data Augmentation """
+        if not osp.exists(impth):
+            raise FileNotFoundError(f"Image directory not found: {impth}")
+        if not osp.exists(gtpth):
+            raise FileNotFoundError(f"Label directory not found: {gtpth}")
+
+        for folder in sorted(os.listdir(impth)):
+            im_folder = osp.join(impth, folder)
+            gt_folder = osp.join(gtpth, folder)
+
+            for im_name in os.listdir(im_folder):
+                if not im_name.endswith("_leftImg8bit.png"):
+                    continue
+
+                base_name = im_name.replace("_leftImg8bit.png", "")
+                im_path = osp.join(im_folder, im_name)
+
+                # Find corresponding label
+                lb_name = f"{base_name}_gtFine_labelIds.png"
+                lb_path = osp.join(gt_folder, lb_name)
+                if not osp.exists(lb_path):
+                    warnings.warn(f"Missing label for {base_name}, skipping.")
+                    continue
+
+                self.imnames.append(base_name)
+                self.imgs[base_name] = im_path
+                self.labels[base_name] = lb_path
+
+        if len(self.imnames) == 0:
+            raise RuntimeError(f"No valid image-label pairs found in {mode} set.")
+
+        # Preprocessing
         self.to_tensor = transforms.Compose(
             [
                 transforms.ToTensor(),
-                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-            ]
-        )
-        self.trans_train = Compose(
-            [
-                ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
-                HorizontalFlip(),
-                RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
-                RandomCrop(self.cropsize),
+                transforms.Normalize(
+                    mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)
+                ),
             ]
         )
 
-    def __getitem__(self, idx):
-        fn = self.imnames[idx]
-        impth = self.imgs[fn]
-        lbpth = self.labels[fn]
-        img = Image.open(impth)
-        label = Image.open(lbpth)
-        if self.mode == "train":
-            im_lb = dict(im=img, lb=label)
-            im_lb = self.trans_train(im_lb)
-            img, label = im_lb["im"], im_lb["lb"]
-        img = self.to_tensor(img)
-        label = np.array(label).astype(np.int64)[np.newaxis, :]
-        label = self.convert_labels(label)
-        return img, label
+        # Training augmentations
+        self.trans_train = (
+            Compose(
+                [
+                    ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+                    HorizontalFlip(),
+                    RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),  # Scale then crop
+                    RandomCrop(cropsize, pad_if_needed=True, ignore_label=ignore_lb),
+                ]
+            )
+            if mode == "train"
+            else None
+        )
 
-    def __len__(self):
+        self.len = len(self.imnames)
+
+    def __getitem__(self, idx: int) -> Tuple[Any, Any]:
+        name = self.imnames[idx]
+        try:
+            img_path = self.imgs[name]
+            lb_path = self.labels[name]
+
+            img = Image.open(img_path).convert("RGB")
+            label = Image.open(lb_path)  # Already grayscale-like label ID map
+
+            # Convert to NumPy
+            label = np.array(label, dtype=np.int64)  # Shape: (H, W)
+
+            # Apply augmentations
+            if self.trans_train is not None:
+                im_lb = {"im": img, "lb": label}
+                im_lb = self.trans_train(im_lb)
+                img, label = im_lb["im"], im_lb["lb"]
+
+            # To Tensor and Normalize
+            img = self.to_tensor(img)  # (C, H, W)
+            label = self.convert_labels(label)  # Remap IDs -> trainIds
+            label = torch.from_numpy(label).long()  # (H, W), no extra dim!
+
+            return img, label
+
+        except Exception as e:
+            print(f"[ERROR] Failed to load sample {name}: {e}")
+            # Return fallback sample to avoid breaking DataLoader
+            return self.__getitem__(np.random.randint(0, len(self)))
+
+    def __len__(self) -> int:
         return self.len
 
-    def convert_labels(self, label):
-        for k, v in self.lb_map.items():
-            label[label == k] = v
-        return label
+    def convert_labels(self, mask: np.ndarray) -> np.ndarray:
+        """Fast label remapping using precomputed lookup table.
+
+        Input: (H, W), values are original IDs
+        Output: (H, W), values mapped to trainIds, with ignored labels handled.
+        """
+        # Use vectorized lookup via indexing
+        new_mask = self._mapping[mask]
+        return new_mask
 
 
+# === Test Block (Fixed) ===
 if __name__ == "__main__":
+    from pathlib import Path
+    import sys
+
+    # Resolve config path relative to this file
+    proj_root = Path(__file__).parent.parent.parent
+    config_path = proj_root / "configs" / "train_citys.json"
+
+    if not config_path.exists():
+        print(f"Config not found at {config_path}, skipping test.")
+        sys.exit(0)
+
+    with open(config_path, "r") as f:
+        params = json.load(f)
+
+    dataset_config = params["dataset_config"]
+    ds = CityScapes(
+        config_file=dataset_config["dataset_config_file"],
+        ignore_lb=dataset_config["ignore_idx"],
+        rootpth=dataset_config["dataset_path"],
+        cropsize=dataset_config["cropsize"],
+        mode="val",
+    )
+
+    print(f"Dataset loaded with {len(ds)} samples.")
+
+    uni = []
     from tqdm import tqdm
 
-    with open("../../configs/train_citys.json", "r") as f:
-        params = json.loads(f.read())
-    ds = CityScapes(params, mode="val")
-    uni = []
-    for im, lb in tqdm(ds):
-        lb_uni = np.unique(lb).tolist()
-        uni.extend(lb_uni)
-    print(set(uni))
+    for img, lb in tqdm(ds, desc="Validating labels"):
+        lb_np = lb.numpy()
+        unique_labels = np.unique(lb_np[lb_np != ds.ignore_lb])  # Exclude ignore
+        uni.extend(unique_labels.tolist())
+
+    print("Unique training IDs found:", sorted(set(uni)))

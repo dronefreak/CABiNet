@@ -1,31 +1,57 @@
+# train_citys.yaml
+# Hydra-based configuration for CABiNet training on Cityscapes
+
+# Root-level defaults
+defaults:
+  - override hydra/launcher: basic
+  - override hydra/sweeper: basic
+
+# Dataset Configuration
 dataset_config:
   name: cityscapes
-  dataset_config_file: /data/saumya/CABiNet/configs/cityscapes_info.json
+  dataset_config_file: configs/cityscapes_info.json # Relative path (project-root relative)
   num_classes: 19
   cropsize: [1024, 1024]
-  dataset_path: /data/saumya/CABiNet/leftImg8bit_trainvaltest/
+  dataset_path: ${env:DATA_ROOT:/data/saumya/CABiNet/leftImg8bit_trainvaltest} # Env override + fallback
   ignore_idx: 255
-  shuffle: true
+  # Note: shuffle is handled in DataLoader, not here
 
+# Training Configuration
 training_config:
   batch_size: 8
   num_workers: 16
-  gpu_id: 0
   epochs: 500
   optimizer_momentum: 0.9
   optimizer_weight_decay: 5e-4
   optimizer_lr_start: 5e-3
   optimizer_power: 0.9
-  warmup_stemps: 4000
+  warmup_steps: 4000
   warmup_start_lr: 1e-5
   max_iterations: 200000
-  msg_iterations: 20
-  experiments_path: cabinet_experiments_23122021
+  log_iter: 20 # Renamed from 'msg_iterations' — clearer intent
+  experiments_path: experiments/cabinet_citys_1024x1024
   model_save_name: cabinet_citys_1024x1024.pth
-  backbone_weights: mobilenetv3-small-55df8e1f.pth
+  backbone_weights: mobilenetv3-small-55df8e1f.pth # Expected in pretrained_backbones/
 
+# Validation Configuration
 validation_config:
   batch_size: 4
-  eval_scales: [0.5, 0.75, 1, 1.25, 1.5, 1.75]
-  validation_output_folder: cabinet_experiments/results
+  num_workers: 8 # Explicitly set (can be lower than training)
+  eval_scales: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75]
   flip: true
+  results_path: ${training_config.experiments_path}/results # Consistent output location
+  save_predictions: false # Optional: save .png preds during eval
+
+# Runtime & Reproducibility
+runtime:
+  seed: 15 # For torch.manual_seed, numpy, random
+  cudnn_benchmark: true # Faster convolutions (if input size stable)
+  deterministic: false # Set to true for full reproducibility (slower)
+
+# Hydra-specific settings
+hydra:
+  run:
+    dir: ${training_config.experiments_path}/runs/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: ${training_config.experiments_path}/sweeps
+    subdir: ${hydra.job.num}
