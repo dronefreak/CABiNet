@@ -2,7 +2,6 @@
 # -*- encoding: utf-8 -*-
 
 import logging
-import os
 from pathlib import Path
 
 from PIL import Image
@@ -10,11 +9,12 @@ import hydra
 import numpy as np
 from omegaconf import DictConfig
 import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 
 from src.datasets.cityscapes import CityScapes
 from src.models.cabinet import CABiNet
-from src.utils import RichConsoleManager
+from src.utils.logger import RichConsoleManager
 
 console = RichConsoleManager.get_console()
 logger = logging.getLogger(__name__)
@@ -68,42 +68,64 @@ def infer_image(
     flip: bool = False,
     device: torch.device = "cuda",
 ):
-    """Multi-scale + flip inference."""
-    model.eval()
-    img_tensor = img_tensor.to(device)
+    """Multi-scale + flip inference on a single image tensor (C, H, W) or (1, C, H, W).
 
-    probs = torch.zeros((1, 19, *img_tensor.shape[2:]), device=device)
+    Returns predicted label map (H, W).
+    """
+    model.eval()
+
+    # Handle both (C, H, W) and (1, C, H, W)
+    if img_tensor.dim() == 3:
+        img_tensor = img_tensor.unsqueeze(0)  # → (1, C, H, W)
+
+    img_tensor = img_tensor.to(device)
+    B, C, H, W = img_tensor.shape
+    assert B == 1, "Only supports one image at a time"
+
+    probs = torch.zeros((1, 19, H, W), device=device)
 
     for scale in scales:
-        if scale != 1.0:
-            h, w = img_tensor.shape[2:]
-            scaled_size = (int(h * scale), int(w * scale))
-            scaled_img = torch.nn.functional.interpolate(
-                img_tensor, size=scaled_size, mode="bilinear", align_corners=False
-            )
+        if scale == 1.0:
+            scaled_input = img_tensor
         else:
-            scaled_img = img_tensor
-
-        out, _ = model(scaled_img)
-        prob = torch.nn.functional.softmax(out, dim=1)
-
-        if flip:
-            flipped_img = torch.flip(scaled_img, dims=(3,))
-            flipped_out, _ = model(flipped_img)
-            flipped_prob = torch.nn.functional.softmax(
-                torch.flip(flipped_out, dims=(3,)), dim=1
+            new_size = [int(H * scale), int(W * scale)]
+            scaled_input = F.interpolate(
+                img_tensor,
+                size=new_size,
+                mode="bilinear",
+                align_corners=False,
+                recompute_scale_factor=False,
             )
+
+        # Forward pass
+        out, _ = model(scaled_input)  # CABiNet outputs (B, 19, h, w)
+        prob = F.softmax(out, dim=1)
+
+        # Flip if enabled
+        if flip:
+            flipped_input = torch.flip(scaled_input, dims=(3,))
+            flipped_out, _ = model(flipped_input)
+            flipped_prob = F.softmax(torch.flip(flipped_out, dims=(3,)), dim=1)
             prob = (prob + flipped_prob) / 2
 
+        # Resize back to original resolution
         if scale != 1.0:
-            prob = torch.nn.functional.interpolate(
-                prob, size=(h, w), mode="bilinear", align_corners=False
+            prob = F.interpolate(
+                prob,
+                size=(H, W),
+                mode="bilinear",
+                align_corners=False,
+                recompute_scale_factor=False,
             )
 
         probs += prob
 
-    preds = torch.argmax(probs, dim=1).cpu().numpy()[0]  # (H, W)
-    return preds
+    # Average over scales
+    probs /= len(scales)
+
+    # Get prediction
+    pred = torch.argmax(probs, dim=1).cpu().numpy()[0]  # (H, W)
+    return pred
 
 
 def visualize_predictions(
@@ -127,13 +149,14 @@ def visualize_predictions(
             lb = None
             has_gt = False
 
-        img_pil = Image.fromarray((img.permute(1, 2, 0).numpy() * 255).astype(np.uint8))
+        # Extract first image in batch (since batch_size=1, it's safe)
+        img_np = img[0].permute(1, 2, 0).cpu().numpy()  # (C, H, W) -> (H, W, C)
+        img_np = (img_np * 255).astype(np.uint8)
+        img_pil = Image.fromarray(img_np)
         # orig_size = img_pil.size  # (W, H)
 
         # Predict
-        pred = infer_image(
-            model, img.unsqueeze(0), scales=[1.0], flip=False, device=device
-        )
+        pred = infer_image(model, img, scales=[1.0], flip=False, device=device)
 
         # Colorize
         color_pred = colorize_mask(pred)
@@ -141,13 +164,17 @@ def visualize_predictions(
 
         # Save
         name = f"sample_{i:04d}"
-        img_pil.save(output_dir / f"{name}_input.png")
-        color_pred.save(output_dir / f"{name}_pred.png")
-        overlay.save(output_dir / f"{name}_overlay.png")
+        save_dir = Path(output_dir) / name
+        save_dir.mkdir(parents=True, exist_ok=True)
+        print(save_dir)
+        img_pil.save(save_dir / "input.png")
+        color_pred.save(save_dir / "pred.png")
+        overlay.save(save_dir / "overlay.png")
 
         if has_gt and show_gt:
-            gt_color = colorize_mask(lb.numpy())
-            gt_color.save(output_dir / f"{name}_gt.png")
+            lb_np = lb[0].cpu().numpy()  # Remove batch dim
+            gt_color = colorize_mask(lb_np)
+            gt_color.save(save_dir / "gt.png")
 
         if i > 50:  # Limit for demo
             break
@@ -155,13 +182,15 @@ def visualize_predictions(
     console.print("✅ Visualization complete!")
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="train_citys")
+@hydra.main(version_base=None, config_path="../../configs", config_name="train_citys")
 def main(cfg: DictConfig) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Load model
     n_classes = cfg.dataset_config.num_classes
-    model = CABiNet(n_classes=n_classes)
+    mode = cfg.model.mode
+    cfgs = cfg.model.cfgs
+    model = CABiNet(n_classes=n_classes, backbone_weights=None, mode=mode, cfgs=cfgs)
     ckpt_path = (
         Path(cfg.training_config.experiments_path) / cfg.training_config.model_save_name
     )
@@ -170,6 +199,7 @@ def main(cfg: DictConfig) -> None:
     model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
+    console.print("✅ Model loaded and set to eval mode.")
 
     # Setup dataset
     ds_val = CityScapes(
@@ -188,7 +218,7 @@ def main(cfg: DictConfig) -> None:
     )
 
     # Output dir
-    vis_output = Path(cfg.get("vis_output", "visualizations/results"))
+    vis_output = Path(cfg.validation_config.results_path) / "visualizations"
     vis_output.mkdir(parents=True, exist_ok=True)
 
     # Run

@@ -103,11 +103,13 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     console.log("Dataloaders ready!", style="info")
     """Build Model."""
     base_path_pretrained = Path("src/models/pretrained_backbones")
-    backbone_weights = (
-        base_path_pretrained / cfg.training_config.backbone_weights
-    ).resolve()
+    backbone_weights = (base_path_pretrained / cfg.model.pretrained_weights).resolve()
+    mode = cfg.model.mode
+    cfgs = cfg.model.cfgs
 
-    net = CABiNet(n_classes=n_classes, backbone_weights=backbone_weights)
+    net = CABiNet(
+        n_classes=n_classes, backbone_weights=backbone_weights, mode=mode, cfgs=cfgs
+    )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     net.to(device)
     console.log("Model moved to device!", style="info")
@@ -125,7 +127,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     max_iter = cfg.training_config.max_iterations
     power = cfg.training_config.optimizer_power
 
-    # 🔴 CRITICAL FIX: Typo in config key
+    # CRITICAL FIX: Typo in config key
     warmup_steps = cfg.training_config.get("warmup_steps", 0)  # Was 'warmup_stemps'
     warmup_start_lr = cfg.training_config.get("warmup_start_lr", lr_start / 10)
 
@@ -159,7 +161,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
 
         return loss.item()
 
-    @torch.no_grad()  # <<<<<<<<<<<<<<<<< CRUCIAL: Disable gradients in val
+    @torch.no_grad()  # <<<<<<<<<<<<<<<<<: Disable gradients in val
     def val_step(im, lb):
         im = im.to(device, non_blocking=True)
         lb = lb.to(device, non_blocking=True).squeeze(1)

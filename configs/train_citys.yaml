@@ -1,10 +1,9 @@
 # train_citys.yaml
 # Hydra-based configuration for CABiNet training on Cityscapes
 
-# Root-level defaults
-defaults:
-  - override hydra/launcher: basic
-  - override hydra/sweeper: basic
+defaults: # these are the sub-config files for specific details, noee for the moment.
+  - _self_ # this makes the top-level config take priority over sub-configs, see https://hydra.cc/docs/upgrades/1.0_to_1.1/default_composition_order/
+  - model: mobilenetv3_large
 
 # Dataset Configuration
 dataset_config:
@@ -21,7 +20,7 @@ dataset_config:
 training_config:
   batch_size: 8
   num_workers: 16
-  epochs: 500
+  epochs: 200
   optimizer_momentum: 0.9
   optimizer_weight_decay: 5e-4
   optimizer_lr_start: 5e-3
@@ -30,9 +29,8 @@ training_config:
   warmup_start_lr: 1e-5
   max_iterations: 200000
   log_iter: 20 # Renamed from 'msg_iterations' — clearer intent
-  experiments_path: experiments/cabinet_citys_1024x1024
-  model_save_name: cabinet_citys_1024x1024.pth
-  backbone_weights: mobilenetv3-small-55df8e1f.pth # Expected in pretrained_backbones/
+  experiments_path: experiments/cabinet_experiments_large_1024x1024
+  model_save_name: cabinet_citys_large_1024x1024.pth
 
 # Validation Configuration
 validation_config:

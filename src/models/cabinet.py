@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.models.cab import ContextAggregationBlock
-from src.models.mobilenetv3 import mobilenetv3_small as MobileNetV3
+from src.models.mobilenetv3 import MobileNetV3
 
 
 class _DWConv(nn.Module):
@@ -179,11 +179,20 @@ class CABiNetOutput(nn.Module):
 
 
 class CABiNet(nn.Module):
-    def __init__(self, n_classes: int, backbone_weights: Optional[Path] = None):
+    def __init__(
+        self,
+        n_classes: int,
+        backbone_weights: Optional[Path] = None,
+        cfgs=None,
+        mode="large",
+    ):
         super().__init__()
         # Load MobileNetV3 backbone
-        self.mobile = MobileNetV3(pretrained=False, width_mult=1.0)
+        self.mobile = MobileNetV3(
+            cfgs=cfgs, mode=mode, num_classes=n_classes, weights=backbone_weights
+        )
 
+        self.attention_planes = 960 if mode == "large" else 576
         # Only load custom weights if provided
         if backbone_weights is not None:
             try:
@@ -199,7 +208,7 @@ class CABiNet(nn.Module):
                     f"Failed to load backbone weights from {backbone_weights}: {e}"
                 )
 
-        self.ab = AttentionBranch(576, 256, 256, n_classes)
+        self.ab = AttentionBranch(self.attention_planes, 256, 256, n_classes)
         self.sb = SpatialBranch()
         self.ffm = FeatureFusionModule(
             128 + 256, 256
@@ -278,24 +287,56 @@ class CABiNet(nn.Module):
 
 
 if __name__ == "__main__":
-    backbone_path = Path(
-        "src/models/pretrained_backbones/mobilenetv3-small-55df8e1f.pth"
-    )
 
-    if not backbone_path.exists():
-        print(
-            f"Warning: Backbone weights not found at {backbone_path},"
-            " training from scratch."
+    input_size = (1, 3, 512, 512)
+    x = torch.randn(input_size)
+
+    models_dict = {
+        "mobilenetv3-small-55df8e1f.pth": [
+            # k, t, c, SE, HS, s
+            [3, 1, 16, 1, 0, 2],
+            [3, 4.5, 24, 0, 0, 2],
+            [3, 3.67, 24, 0, 0, 1],
+            [5, 4, 40, 1, 1, 2],
+            [5, 6, 40, 1, 1, 1],
+            [5, 6, 40, 1, 1, 1],
+            [5, 3, 48, 1, 1, 1],
+            [5, 3, 48, 1, 1, 1],
+            [5, 6, 96, 1, 1, 2],
+            [5, 6, 96, 1, 1, 1],
+            [5, 6, 96, 1, 1, 1],
+        ],
+        "mobilenetv3-large-1cd25616.pth": [
+            # k, t, c, SE, HS, s
+            [3, 1, 16, 0, 0, 1],
+            [3, 4, 24, 0, 0, 2],
+            [3, 3, 24, 0, 0, 1],
+            [5, 3, 40, 1, 0, 2],
+            [5, 3, 40, 1, 0, 1],
+            [5, 3, 40, 1, 0, 1],
+            [3, 6, 80, 0, 1, 2],
+            [3, 2.5, 80, 0, 1, 1],
+            [3, 2.3, 80, 0, 1, 1],
+            [3, 2.3, 80, 0, 1, 1],
+            [3, 6, 112, 1, 1, 1],
+            [3, 6, 112, 1, 1, 1],
+            [5, 6, 160, 1, 1, 2],
+            [5, 6, 160, 1, 1, 1],
+            [5, 6, 160, 1, 1, 1],
+        ],
+    }
+    for key, cfg in models_dict.items():
+        print(f"\nTesting CABiNet with backbone: {key}")
+        mode = "large" if "large" in key else "small"
+        net = CABiNet(
+            n_classes=19,
+            backbone_weights=Path("src/models/pretrained_backbones") / key,
+            mode=mode,
+            cfgs=cfg,
         )
-        backbone_path = None
-
-    net = CABiNet(n_classes=19, backbone_weights=backbone_path)
-    net.eval()
-
-    x = torch.randn(2, 3, 512, 512)
-    with torch.no_grad():
-        out, out16 = net(x)
-
-    print("Output shapes:", out.shape, out16.shape)
-    assert out.shape[-2:] == (512, 512), "Final output must match input size"
-    print("✅ CABiNet forward pass successful!")
+        net.eval()
+        with torch.no_grad():
+            out, out16 = net(x)
+        print("Output shapes:", out.shape, out16.shape)
+        assert out.shape[-2:] == (512, 512), "Final output must match input size"
+        print(f"✅ CABiNet {mode} forward pass successful!")
