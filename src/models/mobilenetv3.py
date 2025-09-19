@@ -4,10 +4,12 @@ Andrew Howard, Mark Sandler, Grace Chu, Liang-Chieh Chen, Bo Chen, Mingxing Tan,
 Zhu, Ruoming Pang, Vijay Vasudevan, Quoc V. Le, Hartwig Adam. (2019). Searching for MobileNetV3
 arXiv preprint arXiv:1905.02244.
 """
-import torch
-import torch.nn as nn
+
 import math
 from pathlib import Path
+
+import torch
+import torch.nn as nn
 
 __all__ = ["mobilenetv3_large", "mobilenetv3_small"]
 

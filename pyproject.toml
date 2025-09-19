@@ -3,6 +3,7 @@
 requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
+
 [tool.black]
 line-length = 88
 target-version = ['py38']
@@ -22,8 +23,9 @@ extend-exclude = '''
 )/
 '''
 
+
 # Enable experimental string processing (f-string formatting)
-experimental-string-processing = true
+# experimental-string-processing = true
 
 [tool.isort]
 profile = "black"

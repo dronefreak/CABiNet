@@ -149,13 +149,28 @@ class MscEvalV0(object):
     def compute_hist(
         pred: np.ndarray, label: np.ndarray, n_classes: int, ignore_label: int
     ):
-        """Compute confusion matrix."""
+        """Compute confusion matrix.
+
+        Args:
+            pred: (H, W) numpy array of predicted class ids
+            label: (H, W) numpy array of ground truth labels
+            n_classes: number of classes
+            ignore_label: label to ignore
+        Returns:
+            confusion matrix (n_classes, n_classes)
+        """
+        if isinstance(label, torch.Tensor):
+            label = label.cpu().numpy()
+        if isinstance(pred, torch.Tensor):
+            pred = pred.cpu().numpy()
+
         valid = label != ignore_label
-        pred = pred[valid].astype(int)
-        label = label[valid].astype(int)
+        pred = pred[valid].astype(np.int64)
+        label = label[valid].astype(np.int64)
 
         # Clip to valid range
         pred = np.clip(pred, 0, n_classes - 1)
+        label = np.clip(label, 0, n_classes - 1)
 
         intersection = pred * n_classes + label
         hist = np.bincount(intersection, minlength=n_classes**2)
@@ -180,7 +195,10 @@ class MscEvalV0(object):
         with torch.no_grad():
             for images, labels in iterator:
                 images = images.to(device, non_blocking=True)
-                labels = labels.cpu().numpy().squeeze(1)  # Move to CPU early
+                labels_np = labels.cpu().numpy()  # Safe: (N, H, W) or (N, 1, H, W)
+                if labels_np.ndim == 4:  # i.e., (N, 1, H, W)
+                    labels_np = labels_np.squeeze(1)
+                # Now labels_np is (N, H, W)
 
                 # Aggregate predictions across scales
                 probs = torch.zeros(

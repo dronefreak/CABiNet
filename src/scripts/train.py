@@ -1,9 +1,12 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
+import os
 from pathlib import Path
+import random
 
 import hydra
+import numpy as np
 from omegaconf import DictConfig, OmegaConf
 import torch
 
@@ -14,14 +17,25 @@ from tqdm import tqdm
 from src.datasets.cityscapes import CityScapes
 from src.datasets.uavid import UAVid
 from src.models.cabinet import CABiNet
-from src.utils.logger import get_rich_console
+from src.scripts.evaluate import MscEvalV0
+from src.utils.logger import RichConsoleManager
 from src.utils.loss import OhemCELoss
 from src.utils.optimizer import Optimizer
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="train_citys")
+def seed_everything(seed: int):
+    random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
+
+
+@hydra.main(version_base=None, config_path="../../configs", config_name="train_citys")
 def train_and_evaluate(cfg: DictConfig) -> None:
-    console = get_rich_console()
+    console = RichConsoleManager.get_console()
     console.print(OmegaConf.to_yaml(cfg), style="warning")
 
     respth = Path(cfg.training_config.experiments_path)
@@ -32,6 +46,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     n_workers = cfg.training_config.num_workers
     cropsize = cfg.dataset_config.cropsize
     ignore_idx = cfg.dataset_config.ignore_idx
+    seed_everything(cfg.dataset_config.seed)
     """Prepare DataLoaders."""
     console.print("Preparing dataloaders!", style="info")
     if cfg.dataset_config.name == "cityscapes":
@@ -240,6 +255,23 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     with open(config_out, "w") as f:
         f.write(OmegaConf.to_yaml(cfg))
     console.print(f"📄 Config saved to: {config_out}")
+
+    # Final evaluation
+    console.print("Starting final evaluation...", style="info")
+    evaluator = MscEvalV0(
+        model=net,
+        dataloader=dl_val,
+        device=device,
+        n_classes=n_classes,
+        ignore_label=ignore_idx,
+        scales=[0.5, 0.75, 1.0, 1.25, 1.5, 1.75],
+        flip=True,
+    )
+    results = evaluator.evaluate()
+    mIoU = results["mIoU"]
+    accuracy = results["accuracy"]
+    console.print(f"🏁 Final mIoU on validation set: {mIoU}", style="info")
+    console.print(f"🏁 Final Accuracy on validation set: {accuracy}", style="info")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 import json
 import os
 import os.path as osp
-from typing import Any, Tuple
+from typing import Tuple
 import warnings
 
 from PIL import Image
@@ -120,35 +120,27 @@ class CityScapes(Dataset):
 
         self.len = len(self.imnames)
 
-    def __getitem__(self, idx: int) -> Tuple[Any, Any]:
-        name = self.imnames[idx]
-        try:
-            img_path = self.imgs[name]
-            lb_path = self.labels[name]
+    def __getitem__(self, idx):
+        fn = self.imnames[idx]
+        impth = self.imgs[fn]
+        lbpth = self.labels[fn]
+        img = Image.open(impth).convert("RGB")
+        label = Image.open(lbpth)  # Keep as PIL until after transforms
 
-            img = Image.open(img_path).convert("RGB")
-            label = Image.open(lb_path)  # Already grayscale-like label ID map
+        if self.mode == "train":
+            im_lb = dict(im=img, lb=label)
+            im_lb = self.trans_train(im_lb)
+            img, label = im_lb["im"], im_lb["lb"]
 
-            # Convert to NumPy
-            label = np.array(label, dtype=np.int64)  # Shape: (H, W)
+        # Convert to tensor
+        img = self.to_tensor(img)
 
-            # Apply augmentations
-            if self.trans_train is not None:
-                im_lb = {"im": img, "lb": label}
-                im_lb = self.trans_train(im_lb)
-                img, label = im_lb["im"], im_lb["lb"]
+        # Now convert label to numpy, remap, then tensor
+        label = np.array(label, dtype=np.int64)  # Shape (H, W)
+        label = self.convert_labels(label)
+        label = torch.from_numpy(label).long()  # No extra dim!
 
-            # To Tensor and Normalize
-            img = self.to_tensor(img)  # (C, H, W)
-            label = self.convert_labels(label)  # Remap IDs -> trainIds
-            label = torch.from_numpy(label).long()  # (H, W), no extra dim!
-
-            return img, label
-
-        except Exception as e:
-            print(f"[ERROR] Failed to load sample {name}: {e}")
-            # Return fallback sample to avoid breaking DataLoader
-            return self.__getitem__(np.random.randint(0, len(self)))
+        return img, label
 
     def __len__(self) -> int:
         return self.len
@@ -186,7 +178,7 @@ if __name__ == "__main__":
         ignore_lb=dataset_config["ignore_idx"],
         rootpth=dataset_config["dataset_path"],
         cropsize=dataset_config["cropsize"],
-        mode="val",
+        mode="train",
     )
 
     print(f"Dataset loaded with {len(ds)} samples.")
