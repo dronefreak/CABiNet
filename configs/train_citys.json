@@ -1,36 +1,33 @@
 {
-    "dataset_config":
-    {
-        "name": "cityscapes",
-        "dataset_config_file": "/home/saumya.saksena/CABiNet/configs/cityscapes_info.json",
-        "num_classes": 19,
-        "cropsize": [1024, 1024],
-        "dataset_path": "/home/saumya.saksena/CABiNet/leftImg8bit_trainvaltest/",
-        "ignore_idx": 255,
-        "shuffle": true
-    },
-    "training_config":
-    {
-        "batch_size": 12,
-        "num_workers": 6,
-        "gpu_id": 0,
-        "optimizer_momentum": 0.9,
-        "optimizer_weight_decay": 5e-4,
-        "optimizer_lr_start": 5e-3,
-        "optimizer_power": 0.9,
-        "warmup_stemps": 4000,
-        "warmup_start_lr": 1e-5,
-        "max_iterations": 200000,
-        "msg_iterations": 200,
-        "experiments_path": "cabinet_experiments_23122021",
-        "model_save_name": "cabinet_citys_1024x1024.pth",
-        "backbone_weights": "mobilenetv3-small-55df8e1f.pth"
-    },
-    "validation_config":
-    {
-        "batch_size": 4,
-        "eval_scales": [0.5, 0.75, 1, 1.25, 1.5, 1.75],
-        "validation_output_folder": "cabinet_experiments/results",
-        "flip": true
-    }
+  "dataset_config": {
+    "name": "cityscapes",
+    "dataset_config_file": "/home/neural_debugger/projects/CABiNet/configs/cityscapes_info.json",
+    "num_classes": 19,
+    "cropsize": [1024, 1024],
+    "dataset_path": "/home/neural_debugger/Downloads/Cityscapes/",
+    "ignore_idx": 255,
+    "shuffle": true
+  },
+  "training_config": {
+    "batch_size": 12,
+    "num_workers": 6,
+    "gpu_id": 0,
+    "optimizer_momentum": 0.9,
+    "optimizer_weight_decay": 5e-4,
+    "optimizer_lr_start": 5e-3,
+    "optimizer_power": 0.9,
+    "warmup_stemps": 4000,
+    "warmup_start_lr": 1e-5,
+    "max_iterations": 200000,
+    "msg_iterations": 200,
+    "experiments_path": "cabinet_experiments_23122021",
+    "model_save_name": "cabinet_citys_1024x1024.pth",
+    "backbone_weights": "mobilenetv3-large-1cd25616.pth"
+  },
+  "validation_config": {
+    "batch_size": 4,
+    "eval_scales": [0.5, 0.75, 1, 1.25, 1.5, 1.75],
+    "validation_output_folder": "cabinet_experiments/results",
+    "flip": true
+  }
 }

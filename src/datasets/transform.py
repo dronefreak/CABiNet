@@ -1,118 +1,127 @@
-#!/usr/bin/python
-# -*- encoding: utf-8 -*-
-
-
-from PIL import Image
-import PIL.ImageEnhance as ImageEnhance
+# src/datasets/transform.py
 import random
 
+from PIL import Image, ImageEnhance
+import numpy as np
 
-class RandomCrop(object):
-    def __init__(self, size, *args, **kwargs):
-        self.size = size
+
+class Compose(object):
+    def __init__(self, transforms):
+        self.transforms = transforms
+
+    def __call__(self, im_lb):
+        for t in self.transforms:
+            im_lb = t(im_lb)
+        return im_lb
+
+
+class RandomScale(object):
+    def __init__(
+        self, scales=(1,), interp_image=Image.BILINEAR, interp_label=Image.NEAREST
+    ):
+        self.scales = [float(s) for s in scales]
+        self.interp_image = interp_image
+        self.interp_label = interp_label
 
     def __call__(self, im_lb):
         im = im_lb["im"]
         lb = im_lb["lb"]
-        assert im.size == lb.size
-        W, H = self.size
-        w, h = im.size
+        assert isinstance(im, Image.Image) and isinstance(
+            lb, Image.Image
+        ), f"Expected PIL images, got {type(im)}, {type(lb)}"
 
-        if (W, H) == (w, h):
-            return dict(im=im, lb=lb)
-        if w < W or h < H:
-            scale = float(W) / w if w < h else float(H) / h
-            w, h = int(scale * w + 1), int(scale * h + 1)
-            im = im.resize((w, h), Image.BILINEAR)
-            lb = lb.resize((w, h), Image.NEAREST)
-        sw, sh = random.random() * (w - W), random.random() * (h - H)
-        crop = int(sw), int(sh), int(sw) + W, int(sh) + H
-        return dict(im=im.crop(crop), lb=lb.crop(crop))
+        scale = random.choice(self.scales)
+        W, H = im.size
+        w = int(round(W * scale))
+        h = int(round(H * scale))
+        return {
+            "im": im.resize((w, h), self.interp_image),
+            "lb": lb.resize((w, h), self.interp_label),
+        }
 
 
 class HorizontalFlip(object):
-    def __init__(self, p=0.5, *args, **kwargs):
+    def __init__(self, p=0.5):
         self.p = p
 
     def __call__(self, im_lb):
         if random.random() > self.p:
             return im_lb
-        else:
-            im = im_lb["im"]
-            lb = im_lb["lb"]
-            return dict(
-                im=im.transpose(Image.FLIP_LEFT_RIGHT),
-                lb=lb.transpose(Image.FLIP_LEFT_RIGHT),
-            )
+        im = im_lb["im"].transpose(Image.FLIP_LEFT_RIGHT)
+        lb = im_lb["lb"].transpose(Image.FLIP_LEFT_RIGHT)
+        return {"im": im, "lb": lb}
 
 
-class RandomScale(object):
-    def __init__(self, scales=(1,), *args, **kwargs):
-        self.scales = scales
+class RandomCrop(object):
+    def __init__(self, size, pad_if_needed=True, ignore_label=255):
+        self.size = tuple(size) if hasattr(size, "__iter__") else (size, size)
+        self.pad_if_needed = pad_if_needed
+        self.ignore_label = ignore_label
 
     def __call__(self, im_lb):
         im = im_lb["im"]
         lb = im_lb["lb"]
-        W, H = im.size
-        scale = random.choice(self.scales)
-        w, h = int(W * scale), int(H * scale)
-        return dict(
-            im=im.resize((w, h), Image.BILINEAR),
-            lb=lb.resize((w, h), Image.NEAREST),
-        )
+        assert isinstance(im, Image.Image) and isinstance(lb, Image.Image)
 
+        target_w, target_h = self.size
+        w, h = im.size
 
-class ColorJitter(object):
-    def __init__(
-        self, brightness=None, contrast=None, saturation=None, *args, **kwargs
-    ):
-        if brightness is not None and brightness > 0:
-            self.brightness = [max(1 - brightness, 0), 1 + brightness]
-        if contrast is not None and contrast > 0:
-            self.contrast = [max(1 - contrast, 0), 1 + contrast]
-        if saturation is not None and saturation > 0:
-            self.saturation = [max(1 - saturation, 0), 1 + saturation]
+        if self.pad_if_needed:
+            pad_w = max(target_w - w, 0)
+            pad_h = max(target_h - h, 0)
+            if pad_w > 0 or pad_h > 0:
+                # Pad image
+                im_np = np.array(im)
+                if len(im_np.shape) == 3:
+                    pad_width = ((0, pad_h), (0, pad_w), (0, 0))
+                else:
+                    pad_width = ((0, pad_h), (0, pad_w))
+                im_np = np.pad(im_np, pad_width, mode="reflect")
+                im = Image.fromarray(im_np)
 
-    def __call__(self, im_lb):
-        im = im_lb["im"]
-        lb = im_lb["lb"]
-        r_brightness = random.uniform(self.brightness[0], self.brightness[1])
-        r_contrast = random.uniform(self.contrast[0], self.contrast[1])
-        r_saturation = random.uniform(self.saturation[0], self.saturation[1])
-        im = ImageEnhance.Brightness(im).enhance(r_brightness)
-        im = ImageEnhance.Contrast(im).enhance(r_contrast)
-        im = ImageEnhance.Color(im).enhance(r_saturation)
-        return dict(
-            im=im,
-            lb=lb,
-        )
+                # Pad label
+                lb_np = np.array(lb)
+                lb_np = np.pad(
+                    lb_np, ((0, pad_h), (0, pad_w)), constant_values=self.ignore_label
+                )
+                lb = Image.fromarray(lb_np, mode="L")
 
+        w, h = im.size
+        if w < target_w or h < target_h:
+            scale = max(target_w / w, target_h / h)
+            new_w, new_h = int(w * scale + 1), int(h * scale + 1)
+            im = im.resize((new_w, new_h), Image.BILINEAR)
+            lb = lb.resize((new_w, new_h), Image.NEAREST)
 
-class MultiScale(object):
-    def __init__(self, scales):
-        self.scales = scales
+        sw = random.randint(0, w - target_w) if w > target_w else 0
+        sh = random.randint(0, h - target_h) if h > target_h else 0
+        crop_box = (sw, sh, sw + target_w, sh + target_h)
 
-    def __call__(self, img):
-        W, H = img.size
-        sizes = [(int(W * ratio), int(H * ratio)) for ratio in self.scales]
-        imgs = []
-        [imgs.append(img.resize(size, Image.BILINEAR)) for size in sizes]
-        return imgs
-
-
-class Compose(object):
-    def __init__(self, do_list):
-        self.do_list = do_list
-
-    def __call__(self, im_lb):
-        for comp in self.do_list:
-            im_lb = comp(im_lb)
+        im_lb["im"] = im.crop(crop_box)
+        im_lb["lb"] = lb.crop(crop_box)
         return im_lb
 
 
-if __name__ == "__main__":
-    flip = HorizontalFlip(p=1)
-    crop = RandomCrop((321, 321))
-    rscales = RandomScale((0.75, 1.0, 1.5, 1.75, 2.0))
-    img = Image.open("data/img.jpg")
-    lb = Image.open("data/label.png")
+class ColorJitter(object):
+    def __init__(self, brightness=None, contrast=None, saturation=None):
+        self.brightness = self._check(brightness)
+        self.contrast = self._check(contrast)
+        self.saturation = self._check(saturation)
+
+    @staticmethod
+    def _check(v):
+        return None if v is None else [max(1 - v, 0), 1 + v]
+
+    def __call__(self, im_lb):
+        im = im_lb["im"]
+        if self.brightness:
+            r = random.uniform(*self.brightness)
+            im = ImageEnhance.Brightness(im).enhance(r)
+        if self.contrast:
+            r = random.uniform(*self.contrast)
+            im = ImageEnhance.Contrast(im).enhance(r)
+        if self.saturation:
+            r = random.uniform(*self.saturation)
+            im = ImageEnhance.Color(im).enhance(r)
+        im_lb["im"] = im
+        return im_lb

@@ -2,20 +2,21 @@
 # -*- encoding: utf-8 -*-
 
 
+import json
+import os
+import os.path as osp
+
+from PIL import Image
+import numpy as np
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
-import os.path as osp
-import os
-from PIL import Image
-import numpy as np
-import json
 from src.datasets.transform import (
     ColorJitter,
+    Compose,
     HorizontalFlip,
     RandomCrop,
     RandomScale,
-    Compose,
 )
 
 
@@ -41,8 +42,7 @@ class UAVid(Dataset):
         with open(self.config_file, "r") as fr:
             labels_info = json.load(fr)
         self.lb_map = {el["trainId"]: el["color"] for el in labels_info}
-
-        """ Parse Image Directory """
+        """Parse Image Directory."""
         self.imgs = {}
         imgnames = []
         impth = osp.join(self.rootpth, "uavid_" + self.mode)
@@ -74,8 +74,7 @@ class UAVid(Dataset):
         assert set(imgnames) == set(gtnames)
         assert set(self.imnames) == set(self.imgs.keys())
         assert set(self.imnames) == set(self.labels.keys())
-
-        """ Pre-processing and Data Augmentation """
+        """Pre-processing and Data Augmentation."""
         self.to_tensor = transforms.Compose(
             [
                 transforms.ToTensor(),
