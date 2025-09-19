@@ -12,8 +12,9 @@ dataset_config:
   dataset_config_file: configs/cityscapes_info.json # Relative path (project-root relative)
   num_classes: 19
   cropsize: [1024, 1024]
-  dataset_path: ${env:DATA_ROOT:/data/saumya/CABiNet/leftImg8bit_trainvaltest} # Env override + fallback
+  dataset_path: ${env:DATA_ROOT:} # Env override + fallback
   ignore_idx: 255
+  seed: 0
   # Note: shuffle is handled in DataLoader, not here
 
 # Training Configuration

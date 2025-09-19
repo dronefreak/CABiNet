@@ -2,10 +2,10 @@
     "dataset_config":
     {
         "name": "cityscapes",
-        "dataset_config_file": "/home/saumya.saksena/CABiNet/configs/cityscapes_info.json",
+        "dataset_config_file": "/home/neural_debugger/projects/CABiNet/configs/cityscapes_info.json",
         "num_classes": 19,
         "cropsize": [1024, 1024],
-        "dataset_path": "/home/saumya.saksena/CABiNet/leftImg8bit_trainvaltest/",
+        "dataset_path": "/home/neural_debugger/Downloads/Cityscapes/",
         "ignore_idx": 255,
         "shuffle": true
     },
