@@ -166,7 +166,6 @@ def visualize_predictions(
         name = f"sample_{i:04d}"
         save_dir = Path(output_dir) / name
         save_dir.mkdir(parents=True, exist_ok=True)
-        print(save_dir)
         img_pil.save(save_dir / "input.png")
         color_pred.save(save_dir / "pred.png")
         overlay.save(save_dir / "overlay.png")
