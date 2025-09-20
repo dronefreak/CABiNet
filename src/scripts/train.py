@@ -120,8 +120,12 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     n_min = max(1, n_min)  # Prevent zero/negative
 
     # Get class weights from config
-    if cfg.training_config.get("class_weights", None):
-        weight = torch.tensor(cfg.training_config.class_weights).float()
+    if cfg.training_config.class_weights.use_weights:
+        weight = (
+            torch.tensor(cfg.training_config.class_weights.cityscapes_class_weights)
+            .float()
+            .to(device)
+        )
     else:
         weight = None
 

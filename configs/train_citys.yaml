@@ -29,27 +29,29 @@ training_config:
   warmup_start_lr: 1e-5
   max_iterations: 200000
   class_weights:
-    [
-      0.8,
-      0.9,
-      0.8,
-      1.5,
-      1.5,
-      2.0,
-      3.0,
-      2.5,
-      0.8,
-      1.0,
-      0.7,
-      1.2,
-      3.0,
-      1.0,
-      4.0,
-      4.0,
-      5.0,
-      4.0,
-      2.0,
-    ]
+    use_weights: true
+    cityscapes_class_weights: [
+        2.8149201869965, # road
+        6.9850029945374, # sidewalk
+        3.7890393733978, # building
+        9.9428062438965, # wall
+        9.7702074050903, # fence
+        9.5110931396484, # pole
+        10.311357498169, # traffic light
+        10.026463508606, # traffic sign
+        4.6323022842407, # vegetation
+        9.5608062744141, # terrain
+        7.8698215484619, # sky
+        9.5168733596802, # person
+        10.373730659485, # rider
+        6.6616044044495, # car
+        10.260489463806, # truck
+        10.287888526917, # bus
+        10.289801597595, # train
+        10.405355453491, # motorcycle
+        10.138095855713, # bicycle
+      ]
+
   log_iter: 20 # Renamed from 'msg_iterations' — clearer intent
   experiments_path: experiments/cabinet_experiments_large_1024x1024
   model_save_name: cabinet_citys_large_1024x1024.pth
