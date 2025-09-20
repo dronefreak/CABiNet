@@ -118,8 +118,20 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     # Fix: Ensure n_min is at least 1 and correctly computed
     n_min = batch_size * cropsize[0] * cropsize[1] // 16
     n_min = max(1, n_min)  # Prevent zero/negative
-    criteria_p = OhemCELoss(thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx)
-    criteria_16 = OhemCELoss(thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx)
+
+    # Get class weights from config
+    if cfg.training_config.get("class_weights", None):
+        weight = torch.tensor(cfg.training_config.class_weights).float()
+    else:
+        weight = None
+
+    # Create losses
+    criteria_p = OhemCELoss(
+        thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx, weight=weight
+    )
+    criteria_16 = OhemCELoss(
+        thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx, weight=weight
+    )
     """Optimizer Setup."""
     momentum = cfg.training_config.optimizer_momentum
     weight_decay = cfg.training_config.optimizer_weight_decay
@@ -146,17 +158,25 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     best_loss = float("inf")
     global_step = 0
 
+    scaler = torch.amp.GradScaler(device=device)  # Mixed precision scaler
+
     def train_step(im, lb):
         im = im.to(device, non_blocking=True)
         lb = lb.to(device, non_blocking=True).squeeze(1)  # Remove channel dim
 
         optim.zero_grad()
-        out, out16 = net(im)
-        loss1 = criteria_p(out, lb)
-        loss2 = criteria_16(out16, lb)
-        loss = loss1 + loss2
-        loss.backward()
-        optim.step()
+        with torch.amp.autocast(device_type=device.type, enabled=True):
+            out, out16 = net(im)
+            loss = criteria_p(out, lb) + criteria_16(out16, lb)
+        scaler.scale(loss).backward()
+        scaler.step(optim)
+        scaler.update()
+        # out, out16 = net(im)
+        # loss1 = criteria_p(out, lb)
+        # loss2 = criteria_16(out16, lb)
+        # loss = loss1 + loss2
+        # loss.backward()
+        # optim.step()
         torch.cuda.synchronize()  # Only needed if measuring time
 
         return loss.item()

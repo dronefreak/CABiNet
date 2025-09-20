@@ -1,25 +1,40 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
+# src/utils/loss.py
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
 class OhemCELoss(nn.Module):
-    """Online Hard Example Mining Cross Entropy Loss Minimizes top-k hard examples above
-    threshold, or n_min hardest if below.
+    """Online Hard Example Mining Cross Entropy Loss with optional class weights.
 
+    Minimizes top-k hard examples above threshold, or n_min hardest if below.
     Handles edge cases: empty valid masks, device placement, mixed precision.
     """
 
-    def __init__(self, thresh, n_min, ignore_lb=255):
+    def __init__(self, thresh, n_min, ignore_lb=255, weight=None):
+        """
+        Args:
+            thresh: float, threshold for loss (before -log(thresh))
+            n_min: int, minimum number of pixels to select
+            ignore_lb: int, label to ignore
+            weight: Tensor of shape (C,), optional weight for each class
+        """
         super(OhemCELoss, self).__init__()
         self.thresh = float(thresh)
         self.n_min = int(n_min)
         self.ignore_lb = ignore_lb
+        self.register_buffer("weight", weight)  # Safe device transfer
+
         # Use reduction='none' to get per-pixel loss
-        self.criteria = nn.CrossEntropyLoss(ignore_index=ignore_lb, reduction="none")
+        self.criteria = nn.CrossEntropyLoss(
+            ignore_index=ignore_lb,
+            reduction="none",
+            weight=weight,  # Apply class weights here
+        )
 
     def forward(self, logits, labels):
         """
@@ -48,14 +63,15 @@ class OhemCELoss(nn.Module):
 
         # Choose top-k: either those above threshold, or top n_min
         if valid_loss_sorted[n_min - 1] > self.thresh:
-            # Take all losses > threshold
             selected_loss = valid_loss_sorted[valid_loss_sorted > self.thresh]
         else:
-            # Take top n_min losses
             selected_loss = valid_loss_sorted[:n_min]
 
         # Return mean of selected hard examples
         return selected_loss.mean()
+
+    def extra_repr(self):
+        return f"thresh={self.thresh}, n_min={self.n_min}, ignore_lb={self.ignore_lb}"
 
 
 class SoftmaxFocalLoss(nn.Module):
