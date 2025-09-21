@@ -18,6 +18,10 @@ from src.datasets.transform import (
     Compose,
     HorizontalFlip,
     RandomCrop,
+    RandomCutout,
+    RandomGamma,
+    RandomGrayscale,
+    RandomNoise,
     RandomScale,
 )
 
@@ -105,13 +109,26 @@ class CityScapes(Dataset):
         )
 
         # Training augmentations
+        # Only applied in 'train' mode
+        # Geometric → Photometric → Regularization is a recommended logical order.
         self.trans_train = (
             Compose(
                 [
+                    # Geometric
+                    HorizontalFlip(p=0.5),
+                    RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
+                    RandomCrop(
+                        size=self.cropsize,
+                        pad_if_needed=True,
+                        ignore_label=self.ignore_lb,
+                    ),
+                    # Photometric
                     ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
-                    HorizontalFlip(),
-                    RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),  # Scale then crop
-                    RandomCrop(cropsize, pad_if_needed=True, ignore_label=ignore_lb),
+                    RandomGrayscale(p=0.2),
+                    RandomGamma(gamma_range=(0.8, 1.2), p=0.3),
+                    RandomNoise(mode="gaussian", sigma=0.03, p=0.3),
+                    # Regularization
+                    RandomCutout(p=0.3, size=64),
                 ]
             )
             if mode == "train"
