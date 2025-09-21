@@ -11,10 +11,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.datasets.cityscapes import CityScapes
-from src.models.cabinet import CABiNet
-from src.utils.logger import setup_logger
-
 # For optional distributed support
 try:
     import torch.distributed as dist
@@ -243,83 +239,12 @@ class MscEvalV0(object):
         return self.evaluate()
 
 
-def evaluate(params: Dict[str, Any], save_pth: str):
-    """Main evaluation function."""
-    log_path = params["validation_config"].get("validation_output_folder", "./res")
-    setup_logger(log_path)
-    logger = logging.getLogger(__name__)
-
-    logger.info("=" * 40)
-    logger.info("Starting Model Evaluation")
-    logger.info("=" * 40)
-
-    # Extract config
-    n_classes = params["dataset_config"]["num_classes"]
-    ignore_idx = params["dataset_config"]["ignore_idx"]
-    batch_size = params["validation_config"]["batch_size"]
-    num_workers = params["training_config"]["num_workers"]
-    eval_scales = params["validation_config"].get("eval_scales", [1.0])
-    flip = params["validation_config"].get("flip", False)
-    cropsize = params["dataset_config"]["cropsize"][0]
-
-    # Load model
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    net = CABiNet(n_classes=n_classes).to(device)
-
-    logger.info(f"Loading weights from {save_pth}")
-    state_dict = torch.load(save_pth, map_location=device)
-    net.load_state_dict(state_dict)
-    net.eval()
-
-    # Dataset
-    ds_val = CityScapes(
-        config_file=params["dataset_config"]["dataset_config_file"],
-        ignore_lb=ignore_idx,
-        rootpth=params["dataset_config"]["dataset_path"],
-        cropsize=params["dataset_config"]["cropsize"],
-        mode="val",
-    )
-    dl = DataLoader(
-        ds_val,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True,
-        drop_last=False,
-        persistent_workers=True if num_workers > 0 else False,
-    )
-
-    # Evaluator
-    logger.info("Computing mIoU...")
-    evaluator = MscEvalV0(
-        model=net,
-        dataloader=dl,
-        n_classes=n_classes,
-        ignore_label=ignore_idx,
-        scales=eval_scales,
-        flip=flip,
-        cropsize=cropsize,
-        device=device,
-    )
-
-    # Evaluate
-    result = evaluator()
-    if result:  # Only rank 0 has results
-        miou = result["mIoU"]
-        acc = result["accuracy"]
-        logger.info(f"✅ Accuracy: {acc:.4f}")
-        logger.info(f"🎯 mIoU: {miou:.4f}")
-        return result
-    return {}
-
-
 if __name__ == "__main__":
     # Example usage
     # You'll need to load your actual params here
     # For now, just test structure
     try:
         print("Evaluation script loaded successfully.")
-        print("Call `evaluate(params, 'path/to/model.pth')` to run.")
     except Exception as e:
         logging.error(f"Evaluation failed: {e}")
         raise

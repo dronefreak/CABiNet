@@ -175,12 +175,6 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         scaler.scale(loss).backward()
         scaler.step(optim)
         scaler.update()
-        # out, out16 = net(im)
-        # loss1 = criteria_p(out, lb)
-        # loss2 = criteria_16(out16, lb)
-        # loss = loss1 + loss2
-        # loss.backward()
-        # optim.step()
         torch.cuda.synchronize()  # Only needed if measuring time
 
         return loss.item()

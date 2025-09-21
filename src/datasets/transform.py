@@ -125,3 +125,87 @@ class ColorJitter(object):
             im = ImageEnhance.Color(im).enhance(r)
         im_lb["im"] = im
         return im_lb
+
+
+class RandomCutout:
+    def __init__(self, p=0.5, size=64):
+        self.p = p
+        self.size = size
+
+    def __call__(self, im_lb):
+        if random.random() < self.p:
+            im = np.array(im_lb["im"])
+            h, w, _ = im.shape
+            y = random.randint(0, h - self.size)
+            x = random.randint(0, w - self.size)
+            im[y : y + self.size, x : x + self.size, :] = 0
+            im_lb["im"] = Image.fromarray(im)
+        return im_lb
+
+
+class RandomGaussianBlur:
+    def __init__(self, p=0.5, radius=(0.1, 2.0)):
+        self.p = p
+        self.radius = radius
+
+    def __call__(self, im_lb):
+        if random.random() < self.p:
+            from PIL import ImageFilter
+
+            r = random.uniform(*self.radius)
+            im_lb["im"] = im_lb["im"].filter(ImageFilter.GaussianBlur(radius=r))
+        return im_lb
+
+
+class RandomGrayscale:
+    def __init__(self, p=0.5):
+        self.p = p
+
+    def __call__(self, im_lb):
+        if random.random() < self.p:
+            im = im_lb["im"].convert("L")  # convert to grayscale
+            im = im.convert("RGB")  # back to 3 channels
+            im_lb["im"] = im
+        return im_lb
+
+
+class RandomGamma:
+    def __init__(self, gamma_range=(0.7, 1.5), p=0.5):
+        self.gamma_range = gamma_range
+        self.p = p
+
+    def __call__(self, im_lb):
+        if random.random() < self.p:
+            gamma = random.uniform(*self.gamma_range)
+            im = np.array(im_lb["im"]).astype(np.float32) / 255.0
+            im = np.clip(im**gamma, 0, 1)  # gamma correction
+            im = (im * 255).astype(np.uint8)
+            im_lb["im"] = Image.fromarray(im)
+        return im_lb
+
+
+class RandomNoise:
+    def __init__(self, mode="gaussian", sigma=0.05, p=0.5):
+        """
+        mode: 'gaussian' or 'poisson'
+        sigma: std for Gaussian (fraction of 255)
+        p: probability of applying
+        """
+        self.mode = mode
+        self.sigma = sigma
+        self.p = p
+
+    def __call__(self, im_lb):
+        if random.random() < self.p:
+            arr = np.array(im_lb["im"]).astype(np.float32)
+
+            if self.mode == "gaussian":
+                noise = np.random.normal(0, self.sigma * 255, arr.shape)
+                arr = arr + noise
+            elif self.mode == "poisson":
+                vals = 2 ** np.ceil(np.log2(len(np.unique(arr))))
+                arr = np.random.poisson(arr * vals) / float(vals)
+
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
+            im_lb["im"] = Image.fromarray(arr)
+        return im_lb
