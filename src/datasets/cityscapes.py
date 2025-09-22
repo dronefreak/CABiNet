@@ -110,7 +110,7 @@ class CityScapes(Dataset):
 
         # Training augmentations
         # Only applied in 'train' mode
-        # Geometric → Photometric → Regularization is a recommended logical order.
+        # Geometric → Photometric → Regularization is the recommended order.
         self.trans_train = (
             Compose(
                 [

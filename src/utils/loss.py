@@ -75,27 +75,40 @@ class OhemCELoss(nn.Module):
 
 
 class SoftmaxFocalLoss(nn.Module):
-    """Focal Loss based on softmax probability.
+    """Focal Loss with per-class weighting for semantic segmentation.
 
-    More numerically stable than applying exp manually.
+    Uses softmax probabilities for numerical stability.
     """
 
-    def __init__(self, gamma, ignore_lb=255):
+    def __init__(self, gamma, weight=None, ignore_lb=255):
+        """
+        Args:
+            gamma (float): Focusing parameter for focal loss.
+            weight (Tensor or list): Per-class weights (length = num_classes).
+            ignore_lb (int): Label to ignore.
+        """
         super(SoftmaxFocalLoss, self).__init__()
         self.gamma = gamma
         self.ignore_lb = ignore_lb
-        self.nll = nn.NLLLoss(ignore_index=ignore_lb)
+
+        if weight is not None:
+            # Convert to tensor if passed as list
+            if not isinstance(weight, torch.Tensor):
+                weight = torch.tensor(weight, dtype=torch.float32)
+        self.register_buffer("weight", weight)  # keeps weights on the same device
+
+        self.nll = nn.NLLLoss(weight=self.weight, ignore_index=self.ignore_lb)
 
     def forward(self, logits, labels):
-        # Apply softmax over classes
+        # Softmax probabilities
         prob = F.softmax(logits, dim=1)  # (N, C, H, W)
-        # Compute log_softmax for numerical stability
-        log_prob = F.log_softmax(logits, dim=1)
-        # Modulate log-prob with (1-p)^gamma
+        log_prob = F.log_softmax(logits, dim=1)  # (N, C, H, W)
+
+        # Focal modulation
         weight = (1 - prob) ** self.gamma
-        # Weighted log likelihood
         focal_log_prob = weight * log_prob
-        # NLL over weighted distribution
+
+        # Negative log-likelihood with class weights
         loss = self.nll(focal_log_prob, labels)
         return loss
 
