@@ -180,7 +180,7 @@ if __name__ == "__main__":
 
     # Resolve config path relative to this file
     proj_root = Path(__file__).parent.parent.parent
-    config_path = proj_root / "configs" / "train_citys.json"
+    config_path = proj_root / "legacy" / "train_citys.json"
 
     if not config_path.exists():
         print(f"Config not found at {config_path}, skipping test.")

@@ -1,0 +1,23 @@
+# Dataset Configuration
+name: uavid
+config_file: configs/UAVid_info.json # Relative path (project-root relative)
+num_classes: 8
+cropsize: [1024, 1024]
+dataset_path: ${env:DATA_ROOT:} # Env override + fallback
+ignore_idx: 255
+seed: 0
+# For semantic segmentation, it’s common to use
+# median frequency balancing with normalization enabled.
+# It gives stable ratios without explosive gradients
+# from huge rare-class weights.
+class_weights: [
+    0.039936, # clutter
+    0.024907, # building
+    0.056136, # road
+    0.611066, # static car
+    0.027781, # tree
+    0.051479, # vegetation
+    6.434527, # human
+    0.754167, # moving car
+  ]
+# Note: shuffle is handled in DataLoader, not here

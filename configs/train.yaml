@@ -4,17 +4,7 @@
 defaults: # these are the sub-config files for specific details, noee for the moment.
   - _self_ # this makes the top-level config take priority over sub-configs, see https://hydra.cc/docs/upgrades/1.0_to_1.1/default_composition_order/
   - model: mobilenetv3_large
-
-# Dataset Configuration
-dataset_config:
-  name: cityscapes
-  dataset_config_file: configs/cityscapes_info.json # Relative path (project-root relative)
-  num_classes: 19
-  cropsize: [1024, 1024]
-  dataset_path: ${env:DATA_ROOT:} # Env override + fallback
-  ignore_idx: 255
-  seed: 0
-  # Note: shuffle is handled in DataLoader, not here
+  - dataset: cityscapes
 
 # Training Configuration
 training_config:
@@ -28,37 +18,14 @@ training_config:
   warmup_steps: 4000
   warmup_start_lr: 1e-5
   max_iterations: 200000
-  class_weights:
-    use_weights: true
-    cityscapes_class_weights: [
-        2.8149201869965, # road
-        6.9850029945374, # sidewalk
-        3.7890393733978, # building
-        9.9428062438965, # wall
-        9.7702074050903, # fence
-        9.5110931396484, # pole
-        10.311357498169, # traffic light
-        10.026463508606, # traffic sign
-        4.6323022842407, # vegetation
-        9.5608062744141, # terrain
-        7.8698215484619, # sky
-        9.5168733596802, # person
-        10.373730659485, # rider
-        6.6616044044495, # car
-        10.260489463806, # truck
-        10.287888526917, # bus
-        10.289801597595, # train
-        10.405355453491, # motorcycle
-        10.138095855713, # bicycle
-      ]
-
+  class_balancing: true
   log_iter: 20 # Renamed from 'msg_iterations' — clearer intent
   experiments_path: experiments/cabinet_experiments_large_1024x1024
   model_save_name: cabinet_citys_large_1024x1024.pth
 
 # Validation Configuration
 validation_config:
-  batch_size: 4
+  batch_size: 2
   num_workers: 8 # Explicitly set (can be lower than training)
   eval_scales: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75]
   flip: true

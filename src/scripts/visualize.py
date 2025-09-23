@@ -181,12 +181,12 @@ def visualize_predictions(
     console.print("✅ Visualization complete!")
 
 
-@hydra.main(version_base=None, config_path="../../configs", config_name="train_citys")
+@hydra.main(version_base=None, config_path="../../configs", config_name="train")
 def main(cfg: DictConfig) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Load model
-    n_classes = cfg.dataset_config.num_classes
+    n_classes = cfg.dataset.num_classes
     mode = cfg.model.mode
     cfgs = cfg.model.cfgs
     model = CABiNet(n_classes=n_classes, backbone_weights=None, mode=mode, cfgs=cfgs)
@@ -202,10 +202,10 @@ def main(cfg: DictConfig) -> None:
 
     # Setup dataset
     ds_val = CityScapes(
-        config_file=cfg.dataset_config.dataset_config_file,
-        ignore_lb=cfg.dataset_config.ignore_idx,
-        rootpth=cfg.dataset_config.dataset_path,
-        cropsize=cfg.dataset_config.cropsize,
+        config_file=cfg.dataset.config_file,
+        ignore_lb=cfg.dataset.ignore_idx,
+        rootpth=cfg.dataset.dataset_path,
+        cropsize=cfg.dataset.cropsize,
         mode="val",
     )
     dl_val = torch.utils.data.DataLoader(
