@@ -41,61 +41,45 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     respth = Path(cfg.training_config.experiments_path)
     respth.mkdir(parents=True, exist_ok=True)
     """Set Dataset Params."""
-    n_classes = cfg.dataset_config.num_classes
+    n_classes = cfg.dataset.num_classes
     batch_size = cfg.training_config.batch_size
     n_workers = cfg.training_config.num_workers
-    cropsize = cfg.dataset_config.cropsize
-    ignore_idx = cfg.dataset_config.ignore_idx
-    seed_everything(cfg.dataset_config.seed)
+    cropsize = cfg.dataset.cropsize
+    ignore_idx = cfg.dataset.ignore_idx
+    seed_everything(cfg.dataset.seed)
     """Prepare DataLoaders."""
     console.print("Preparing dataloaders!", style="info")
-    if cfg.dataset_config.name == "cityscapes":
-        ds_train = CityScapes(
-            config_file=cfg.dataset_config.dataset_config_file,
-            ignore_lb=ignore_idx,
-            rootpth=cfg.dataset_config.dataset_path,
-            cropsize=cropsize,
-            mode="train",
-        )
-        ds_val = CityScapes(
-            config_file=cfg.dataset_config.dataset_config_file,
-            ignore_lb=ignore_idx,
-            rootpth=cfg.dataset_config.dataset_path,
-            cropsize=cropsize,
-            mode="val",
-        )
-        ds_test = CityScapes(
-            config_file=cfg.dataset_config.dataset_config_file,
-            ignore_lb=ignore_idx,
-            rootpth=cfg.dataset_config.dataset_path,
-            cropsize=cropsize,
-            mode="val",
-        )
-    elif cfg.dataset_config.name == "uavid":
-        ds_train = UAVid(
-            config_file=cfg.dataset_config.dataset_config_file,
-            ignore_lb=ignore_idx,
-            rootpth=cfg.dataset_config.dataset_path,
-            cropsize=cropsize,
-            mode="train",
-        )
-        ds_val = UAVid(
-            config_file=cfg.dataset_config.dataset_config_file,
-            ignore_lb=ignore_idx,
-            rootpth=cfg.dataset_config.dataset_path,
-            cropsize=cropsize,
-            mode="val",
-        )
-        ds_test = UAVid(
-            config_file=cfg.dataset_config.dataset_config_file,
-            ignore_lb=ignore_idx,
-            rootpth=cfg.dataset_config.dataset_path,
-            cropsize=cropsize,
-            mode="val",
-        )
-    else:
-        raise NotImplementedError(f"Dataset {cfg.dataset_config.name} not supported.")
 
+    # Map dataset names to their classes
+    DATASET_REGISTRY = {
+        "cityscapes": CityScapes,
+        "uavid": UAVid,
+        # "kitti": KittiDataset,
+        # "mapillary": MapillaryDataset,
+        # Add more datasets here as needed
+    }
+
+    console.print("Preparing dataloaders!", style="info")
+
+    # Retrieve the dataset class dynamically
+    dataset_cls = DATASET_REGISTRY.get(cfg.dataset.name.lower())
+    if dataset_cls is None:
+        raise NotImplementedError(f"Dataset '{cfg.dataset.name}' not supported.")
+
+    # Common parameters
+    common_args = dict(
+        config_file=cfg.dataset.config_file,
+        ignore_lb=ignore_idx,
+        rootpth=cfg.dataset.dataset_path,
+        cropsize=cropsize,
+    )
+
+    # Create the three splits
+    ds_train = dataset_cls(**common_args, mode="train")
+    ds_val = dataset_cls(**common_args, mode="val")
+    ds_test = dataset_cls(**common_args, mode="val")
+
+    # Create DataLoaders
     dl_train = DataLoader(
         ds_train,
         batch_size=batch_size,
@@ -143,12 +127,8 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     n_min = max(1, n_min)  # Prevent zero/negative
 
     # Get class weights from config
-    if cfg.training_config.class_weights.use_weights:
-        weight = (
-            torch.tensor(cfg.training_config.class_weights.cityscapes_class_weights)
-            .float()
-            .to(device)
-        )
+    if cfg.training_config.class_balancing:
+        weight = torch.tensor(cfg.dataset.class_weights).float().to(device)
     else:
         weight = None
 

@@ -1,6 +1,6 @@
 # Dataset Configuration
 name: cityscapes
-dataset_config_file: configs/cityscapes_info.json # Relative path (project-root relative)
+config_file: configs/cityscapes_info.json # Relative path (project-root relative)
 num_classes: 19
 cropsize: [1024, 1024]
 dataset_path: ${env:DATA_ROOT:} # Env override + fallback
