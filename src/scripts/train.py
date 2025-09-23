@@ -136,168 +136,168 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     net.to(device)
     console.log("Model moved to device!", style="info")
-    # """Define Loss Functions."""
-    # score_thres = 0.7
-    # # Fix: Ensure n_min is at least 1 and correctly computed
-    # n_min = batch_size * cropsize[0] * cropsize[1] // 16
-    # n_min = max(1, n_min)  # Prevent zero/negative
+    """Define Loss Functions."""
+    score_thres = 0.7
+    # Fix: Ensure n_min is at least 1 and correctly computed
+    n_min = batch_size * cropsize[0] * cropsize[1] // 16
+    n_min = max(1, n_min)  # Prevent zero/negative
 
-    # # Get class weights from config
-    # if cfg.training_config.class_weights.use_weights:
-    #     weight = (
-    #         torch.tensor(cfg.training_config.class_weights.cityscapes_class_weights)
-    #         .float()
-    #         .to(device)
-    #     )
-    # else:
-    #     weight = None
+    # Get class weights from config
+    if cfg.training_config.class_weights.use_weights:
+        weight = (
+            torch.tensor(cfg.training_config.class_weights.cityscapes_class_weights)
+            .float()
+            .to(device)
+        )
+    else:
+        weight = None
 
-    # # Create losses
-    # criteria_p = OhemCELoss(
-    #     thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx, weight=weight
-    # )
-    # criteria_16 = OhemCELoss(
-    #     thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx, weight=weight
-    # )
-    # """Optimizer Setup."""
-    # momentum = cfg.training_config.optimizer_momentum
-    # weight_decay = cfg.training_config.optimizer_weight_decay
-    # lr_start = cfg.training_config.optimizer_lr_start
-    # max_iter = cfg.training_config.max_iterations
-    # power = cfg.training_config.optimizer_power
+    # Create losses
+    criteria_p = OhemCELoss(
+        thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx, weight=weight
+    )
+    criteria_16 = OhemCELoss(
+        thresh=score_thres, n_min=n_min, ignore_lb=ignore_idx, weight=weight
+    )
+    """Optimizer Setup."""
+    momentum = cfg.training_config.optimizer_momentum
+    weight_decay = cfg.training_config.optimizer_weight_decay
+    lr_start = cfg.training_config.optimizer_lr_start
+    max_iter = cfg.training_config.max_iterations
+    power = cfg.training_config.optimizer_power
 
-    # # CRITICAL FIX: Typo in config key
-    # warmup_steps = cfg.training_config.get("warmup_steps", 0)  # Was 'warmup_stemps'
-    # warmup_start_lr = cfg.training_config.get("warmup_start_lr", lr_start / 10)
+    # CRITICAL FIX: Typo in config key
+    warmup_steps = cfg.training_config.get("warmup_steps", 0)  # Was 'warmup_stemps'
+    warmup_start_lr = cfg.training_config.get("warmup_start_lr", lr_start / 10)
 
-    # optim = Optimizer(
-    #     model=net,
-    #     lr0=lr_start,
-    #     momentum=momentum,
-    #     wd=weight_decay,
-    #     warmup_steps=warmup_steps,
-    #     warmup_start_lr=warmup_start_lr,
-    #     max_iter=max_iter,
-    #     power=power,
-    # )
-    # """Training Loop."""
-    # epochs = cfg.training_config.epochs
-    # best_loss = float("inf")
-    # global_step = 0
+    optim = Optimizer(
+        model=net,
+        lr0=lr_start,
+        momentum=momentum,
+        wd=weight_decay,
+        warmup_steps=warmup_steps,
+        warmup_start_lr=warmup_start_lr,
+        max_iter=max_iter,
+        power=power,
+    )
+    """Training Loop."""
+    epochs = cfg.training_config.epochs
+    best_loss = float("inf")
+    global_step = 0
 
-    # scaler = torch.amp.GradScaler(device=device)  # Mixed precision scaler
+    scaler = torch.amp.GradScaler(device=device)  # Mixed precision scaler
 
-    # def train_step(im, lb):
-    #     im = im.to(device, non_blocking=True)
-    #     lb = lb.to(device, non_blocking=True).squeeze(1)  # Remove channel dim
+    def train_step(im, lb):
+        im = im.to(device, non_blocking=True)
+        lb = lb.to(device, non_blocking=True).squeeze(1)  # Remove channel dim
 
-    #     optim.zero_grad()
-    #     with torch.amp.autocast(device_type=device.type, enabled=True):
-    #         out, out16 = net(im)
-    #         loss = criteria_p(out, lb) + criteria_16(out16, lb)
-    #     scaler.scale(loss).backward()
-    #     scaler.step(optim)
-    #     scaler.update()
-    #     torch.cuda.synchronize()  # Only needed if measuring time
+        optim.zero_grad()
+        with torch.amp.autocast(device_type=device.type, enabled=True):
+            out, out16 = net(im)
+            loss = criteria_p(out, lb) + criteria_16(out16, lb)
+        scaler.scale(loss).backward()
+        scaler.step(optim)
+        scaler.update()
+        torch.cuda.synchronize()  # Only needed if measuring time
 
-    #     return loss.item()
+        return loss.item()
 
-    # @torch.no_grad()  # <<<<<<<<<<<<<<<<<: Disable gradients in val
-    # def val_step(im, lb):
-    #     im = im.to(device, non_blocking=True)
-    #     lb = lb.to(device, non_blocking=True).squeeze(1)
+    @torch.no_grad()  # <<<<<<<<<<<<<<<<<: Disable gradients in val
+    def val_step(im, lb):
+        im = im.to(device, non_blocking=True)
+        lb = lb.to(device, non_blocking=True).squeeze(1)
 
-    #     out, out16 = net(im)
-    #     loss1 = criteria_p(out, lb)
-    #     loss2 = criteria_16(out16, lb)
-    #     loss = loss1 + loss2
+        out, out16 = net(im)
+        loss1 = criteria_p(out, lb)
+        loss2 = criteria_16(out16, lb)
+        loss = loss1 + loss2
 
-    #     return loss.item()
+        return loss.item()
 
-    # console.rule("[bold green]Starting Training[/bold green]")
+    console.rule("[bold green]Starting Training[/bold green]")
 
-    # try:
-    #     for epoch in range(epochs):
-    #         torch.cuda.empty_cache()  # Light cleanup before epoch
+    try:
+        for epoch in range(epochs):
+            torch.cuda.empty_cache()  # Light cleanup before epoch
 
-    #         # --- Training Phase ---
-    #         net.train()
-    #         train_loss = 0.0
-    #         train_pbar = tqdm(dl_train, desc=f"Epoch [{epoch+1}/{epochs}] - Train")
-    #         for ims, lbs in train_pbar:
-    #             loss = train_step(ims, lbs)
-    #             train_loss += loss
-    #             global_step += 1
-    #             train_pbar.set_postfix(loss=loss)
+            # --- Training Phase ---
+            net.train()
+            train_loss = 0.0
+            train_pbar = tqdm(dl_train, desc=f"Epoch [{epoch+1}/{epochs}] - Train")
+            for ims, lbs in train_pbar:
+                loss = train_step(ims, lbs)
+                train_loss += loss
+                global_step += 1
+                train_pbar.set_postfix(loss=loss)
 
-    #         train_loss /= len(dl_train)  # Proper average
+            train_loss /= len(dl_train)  # Proper average
 
-    #         # --- Validation Phase ---
-    #         torch.cuda.empty_cache()
-    #         net.eval()
-    #         val_loss = 0.0
-    #         val_pbar = tqdm(dl_val, desc="Validation")
-    #         for ims, lbs in val_pbar:
-    #             loss = val_step(ims, lbs)
-    #             val_loss += loss
-    #             val_pbar.set_postfix(val_loss=loss)
+            # --- Validation Phase ---
+            torch.cuda.empty_cache()
+            net.eval()
+            val_loss = 0.0
+            val_pbar = tqdm(dl_val, desc="Validation")
+            for ims, lbs in val_pbar:
+                loss = val_step(ims, lbs)
+                val_loss += loss
+                val_pbar.set_postfix(val_loss=loss)
 
-    #         val_loss /= len(dl_val)
+            val_loss /= len(dl_val)
 
-    #         console.print(
-    #             f"Epoch [{epoch+1}/{epochs}] | "
-    #             f"Train Loss: {train_loss:.4f} | "
-    #             f"Val Loss: {val_loss:.4f}"
-    #         )
+            console.print(
+                f"Epoch [{epoch+1}/{epochs}] | "
+                f"Train Loss: {train_loss:.4f} | "
+                f"Val Loss: {val_loss:.4f}"
+            )
 
-    #         # --- Save Best Model ---
-    #         if val_loss < best_loss:
-    #             best_loss = val_loss
-    #             save_name = cfg.training_config.model_save_name.replace(
-    #                 ".pth", "_best.pth"
-    #             )
-    #             save_pth = respth / save_name
+            # --- Save Best Model ---
+            if val_loss < best_loss:
+                best_loss = val_loss
+                save_name = cfg.training_config.model_save_name.replace(
+                    ".pth", "_best.pth"
+                )
+                save_pth = respth / save_name
 
-    #             # Save without context of DDP/module wrapping
-    #             state_dict = (
-    #                 net.module.state_dict()
-    #                 if hasattr(net, "module")
-    #                 else net.state_dict()
-    #             )
-    #             torch.save(state_dict, str(save_pth))
-    #             console.print(
-    #                 f"[bold yellow]New best model saved:[/bold yellow] {save_pth}"
-    #             )
+                # Save without context of DDP/module wrapping
+                state_dict = (
+                    net.module.state_dict()
+                    if hasattr(net, "module")
+                    else net.state_dict()
+                )
+                torch.save(state_dict, str(save_pth))
+                console.print(
+                    f"[bold yellow]New best model saved:[/bold yellow] {save_pth}"
+                )
 
-    #         # End of epoch TQDM cleanup
-    #         train_pbar.close()
-    #         val_pbar.close()
+            # End of epoch TQDM cleanup
+            train_pbar.close()
+            val_pbar.close()
 
-    #     # End of training
-    #     console.rule("[bold blue]Training Completed[/bold blue]")
-    #     console.print(f"✅ Final model trained for {epochs} epochs.")
-    #     console.print(f"🏆 Best validation loss: {best_loss:.4f}")
+        # End of training
+        console.rule("[bold blue]Training Completed[/bold blue]")
+        console.print(f"✅ Final model trained for {epochs} epochs.")
+        console.print(f"🏆 Best validation loss: {best_loss:.4f}")
 
-    # except KeyboardInterrupt:
-    #     console.print("[red]Training interrupted by user.[/red]")
-    # except Exception as e:
-    #     console.print(f"[red]Error during training: {e}[/red]")
-    #     raise
-    # finally:
-    #     # Always attempt cleanup
-    #     torch.cuda.empty_cache()
+    except KeyboardInterrupt:
+        console.print("[red]Training interrupted by user.[/red]")
+    except Exception as e:
+        console.print(f"[red]Error during training: {e}[/red]")
+        raise
+    finally:
+        # Always attempt cleanup
+        torch.cuda.empty_cache()
 
-    # # Save final model
-    # save_pth_final = respth / cfg.training_config.model_save_name
-    # state_dict = net.module.state_dict() if hasattr(net, "module") else net.state_dict()
-    # torch.save(state_dict, str(save_pth_final))
-    # console.print(f"💾 Final model saved to: {save_pth_final}")
+    # Save final model
+    save_pth_final = respth / cfg.training_config.model_save_name
+    state_dict = net.module.state_dict() if hasattr(net, "module") else net.state_dict()
+    torch.save(state_dict, str(save_pth_final))
+    console.print(f"💾 Final model saved to: {save_pth_final}")
 
-    # # Optional: Save config
-    # config_out = respth / "config.yaml"
-    # with open(config_out, "w") as f:
-    #     f.write(OmegaConf.to_yaml(cfg))
-    # console.print(f"📄 Config saved to: {config_out}")
+    # Optional: Save config
+    config_out = respth / "config.yaml"
+    with open(config_out, "w") as f:
+        f.write(OmegaConf.to_yaml(cfg))
+    console.print(f"📄 Config saved to: {config_out}")
 
     # Final evaluation on the test set
     # It is 'val' for Cityscapes anyway,
