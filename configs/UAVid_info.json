@@ -84,7 +84,7 @@
     "hasInstances": false,
     "category": "void",
     "catid": 0,
-    "name": "something",
+    "name": "IgnoreLabel",
     "ignoreInEval": true,
     "id": 8,
     "color": [0, 10, 0],

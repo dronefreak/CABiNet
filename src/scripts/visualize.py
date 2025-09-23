@@ -181,7 +181,7 @@ def visualize_predictions(
     console.print("✅ Visualization complete!")
 
 
-@hydra.main(version_base=None, config_path="../../configs", config_name="train_citys")
+@hydra.main(version_base=None, config_path="../../configs", config_name="train")
 def main(cfg: DictConfig) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

@@ -33,7 +33,7 @@ def seed_everything(seed: int):
     torch.backends.cudnn.benchmark = True
 
 
-@hydra.main(version_base=None, config_path="../../configs", config_name="train_citys")
+@hydra.main(version_base=None, config_path="../../configs", config_name="train")
 def train_and_evaluate(cfg: DictConfig) -> None:
     console = RichConsoleManager.get_console()
     console.print(OmegaConf.to_yaml(cfg), style="warning")

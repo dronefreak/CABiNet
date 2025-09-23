@@ -1,10 +1,10 @@
 {
   "dataset_config": {
     "name": "uavid",
-    "dataset_config_file": "/home/saumya.saksena/CABiNet/configs/UAVid_info.json",
+    "dataset_config_file": "/home/saumya.saksena/projects/CABiNet/configs/UAVid_info.json",
     "num_classes": 8,
     "cropsize": [1024, 1024],
-    "dataset_path": "/home/saumya.saksena/CABiNet/uavid_v1.5_official_release_image/",
+    "dataset_path": "/home/saumya.saksena/Téléchargements/recovered_files/UAVid-v1",
     "ignore_idx": 255,
     "shuffle": true
   },
