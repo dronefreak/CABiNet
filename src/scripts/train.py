@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.datasets.cityscapes import CityScapes
-from src.datasets.uavid import UAVid
+from src.datasets.uavid import UAVid, uavid_collate_fn
 from src.models.cabinet import CABiNet
 from src.scripts.evaluate import MscEvalV0
 from src.utils.logger import RichConsoleManager
@@ -88,6 +88,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         pin_memory=True,
         drop_last=True,
         persistent_workers=True if n_workers > 0 else False,  # Avoid worker restart
+        collate_fn=uavid_collate_fn if cfg.dataset.name.lower() == "uavid" else None,
     )
     dl_val = DataLoader(
         ds_val,
@@ -97,6 +98,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         pin_memory=True,
         drop_last=False,  # <<<<<<<<<< Better for eval consistency
         persistent_workers=True if n_workers > 0 else False,
+        collate_fn=uavid_collate_fn if cfg.dataset.name.lower() == "uavid" else None,
     )
     dl_test = DataLoader(
         ds_test,
@@ -106,6 +108,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         pin_memory=True,
         drop_last=False,  # <<<<<<<<<< Better for eval consistency
         persistent_workers=True if n_workers > 0 else False,
+        collate_fn=uavid_collate_fn if cfg.dataset.name.lower() == "uavid" else None,
     )
     console.log("Dataloaders ready!", style="info")
     """Build Model."""
@@ -162,22 +165,25 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     )
     """Training Loop."""
     epochs = cfg.training_config.epochs
+    accum_steps = cfg.training_config.accum_steps  # Simulate batch size * accum_steps
     best_loss = float("inf")
     global_step = 0
 
     scaler = torch.amp.GradScaler(device=device)  # Mixed precision scaler
 
-    def train_step(im, lb):
+    def train_step(im, lb, i):
         im = im.to(device, non_blocking=True)
         lb = lb.to(device, non_blocking=True).squeeze(1)  # Remove channel dim
 
         optim.zero_grad()
         with torch.amp.autocast(device_type=device.type, enabled=True):
             out, out16 = net(im)
-            loss = criteria_p(out, lb) + criteria_16(out16, lb)
+            loss = (criteria_p(out, lb) + criteria_16(out16, lb)) / accum_steps
         scaler.scale(loss).backward()
-        scaler.step(optim)
-        scaler.update()
+        if (i + 1) % accum_steps == 0:
+            scaler.step(optim)
+            scaler.update()
+            optim.zero_grad()
         torch.cuda.synchronize()  # Only needed if measuring time
 
         return loss.item()
@@ -204,8 +210,8 @@ def train_and_evaluate(cfg: DictConfig) -> None:
             net.train()
             train_loss = 0.0
             train_pbar = tqdm(dl_train, desc=f"Epoch [{epoch+1}/{epochs}] - Train")
-            for ims, lbs in train_pbar:
-                loss = train_step(ims, lbs)
+            for i, (ims, lbs) in enumerate(train_pbar):
+                loss = train_step(ims, lbs, i)
                 train_loss += loss
                 global_step += 1
                 train_pbar.set_postfix(loss=loss)

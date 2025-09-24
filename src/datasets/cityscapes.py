@@ -14,13 +14,13 @@ from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
 from src.datasets.transform import (
-    ColorJitter,
     Compose,
-    HorizontalFlip,
+    RandomColorJitter,
     RandomCrop,
     RandomCutout,
     RandomGamma,
     RandomGrayscale,
+    RandomHorizontalFlip,
     RandomNoise,
     RandomScale,
 )
@@ -115,7 +115,7 @@ class CityScapes(Dataset):
             Compose(
                 [
                     # Geometric
-                    HorizontalFlip(p=0.5),
+                    RandomHorizontalFlip(p=0.5),
                     RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
                     RandomCrop(
                         size=self.cropsize,
@@ -123,7 +123,7 @@ class CityScapes(Dataset):
                         ignore_label=self.ignore_lb,
                     ),
                     # Photometric
-                    ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+                    RandomColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
                     RandomGrayscale(p=0.2),
                     RandomGamma(gamma_range=(0.8, 1.2), p=0.3),
                     RandomNoise(mode="gaussian", sigma=0.03, p=0.3),

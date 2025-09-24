@@ -79,15 +79,5 @@
     "id": 7,
     "color": [64, 0, 128],
     "trainId": 7
-  },
-  {
-    "hasInstances": false,
-    "category": "void",
-    "catid": 0,
-    "name": "IgnoreLabel",
-    "ignoreInEval": true,
-    "id": 8,
-    "color": [0, 10, 0],
-    "trainId": 255
   }
 ]

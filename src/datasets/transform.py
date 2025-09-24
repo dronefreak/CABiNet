@@ -40,7 +40,7 @@ class RandomScale(object):
         }
 
 
-class HorizontalFlip(object):
+class RandomHorizontalFlip(object):
     def __init__(self, p=0.5):
         self.p = p
 
@@ -102,7 +102,7 @@ class RandomCrop(object):
         return im_lb
 
 
-class ColorJitter(object):
+class RandomColorJitter(object):
     def __init__(self, brightness=None, contrast=None, saturation=None):
         self.brightness = self._check(brightness)
         self.contrast = self._check(contrast)
@@ -209,3 +209,20 @@ class RandomNoise:
             arr = np.clip(arr, 0, 255).astype(np.uint8)
             im_lb["im"] = Image.fromarray(arr)
         return im_lb
+
+
+class RandomRotate(object):
+    """Small random rotation to simulate UAV yaw changes."""
+
+    def __init__(
+        self, degrees=(-15, 15), interp_image=Image.BILINEAR, interp_label=Image.NEAREST
+    ):
+        self.degrees = degrees
+        self.interp_image = interp_image
+        self.interp_label = interp_label
+
+    def __call__(self, im_lb):
+        angle = random.uniform(*self.degrees)
+        im = im_lb["im"].rotate(angle, resample=self.interp_image, expand=True)
+        lb = im_lb["lb"].rotate(angle, resample=self.interp_label, expand=True)
+        return {"im": im, "lb": lb}
