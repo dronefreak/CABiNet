@@ -6,18 +6,14 @@ cropsize: [1024, 1024]
 dataset_path: ${env:DATA_ROOT:} # Env override + fallback
 ignore_idx: 255
 seed: 0
-# For semantic segmentation, it’s common to use
-# median frequency balancing with normalization enabled.
-# It gives stable ratios without explosive gradients
-# from huge rare-class weights.
 class_weights: [
-    0.039936, # clutter
-    0.024907, # building
-    0.056136, # road
-    0.611066, # static car
-    0.027781, # tree
-    0.051479, # vegetation
-    6.434527, # human
-    0.754167, # moving car
+    1.60, # clutter
+    1.00, # building
+    2.26, # road
+    15.31, # static car
+    1.43, # tree
+    2.48, # vegetation
+    20.00, # human
+    18.89, # moving car
   ]
 # Note: shuffle is handled in DataLoader, not here

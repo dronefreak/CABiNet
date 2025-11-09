@@ -12,12 +12,38 @@ from torch.utils.data import Dataset
 import torchvision.transforms as transforms
 
 from src.datasets.transform import (
-    ColorJitter,
     Compose,
-    HorizontalFlip,
+    RandomColorJitter,
     RandomCrop,
+    RandomCutout,
+    RandomGamma,
+    RandomHorizontalFlip,
+    RandomNoise,
+    RandomRotate,
     RandomScale,
 )
+
+
+def uavid_collate_fn(batch):
+    """Collate function for UAVid that flattens patch lists into batch dimension.
+
+    Each item in batch has 4 patches → output batch size = 4 * N
+    """
+    all_imgs = []
+    all_labels = []
+    names = []
+
+    for item in batch:
+        # item: dict with 'img_patches', 'label_patches', 'name'
+        all_imgs.extend(item["img_patches"])  # List of 4 tensors
+        all_labels.extend(item["label_patches"])
+        names.extend([item["name"]] * 4)  # Track source
+
+    # Stack into single batch tensors
+    batched_imgs = torch.stack(all_imgs, dim=0)  # (4*N, 3, 1080, 1920)
+    batched_labels = torch.stack(all_labels, dim=0)  # (4*N, 1080, 1920)
+
+    return batched_imgs, batched_labels
 
 
 class UAVid(Dataset):
@@ -85,18 +111,32 @@ class UAVid(Dataset):
             [
                 transforms.ToTensor(),
                 transforms.Normalize(
-                    mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)
+                    mean=(0.480, 0.499, 0.457), std=(0.225, 0.208, 0.228)
                 ),
             ]
         )
 
+        # Training augmentations
+        # Only applied in 'train' mode
+        # Geometric → Photometric → Regularization is the recommended order.
         self.trans_train = (
             Compose(
                 [
-                    ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
-                    HorizontalFlip(p=0.5),
+                    # Geometric
+                    RandomHorizontalFlip(p=0.2),
+                    RandomRotate(degrees=(-10, 10)),
                     RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
-                    RandomCrop(cropsize, pad_if_needed=True, ignore_label=ignore_lb),
+                    RandomCrop(
+                        size=self.cropsize,
+                        pad_if_needed=True,
+                        ignore_label=self.ignore_lb,
+                    ),
+                    # Photometric
+                    RandomColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+                    RandomGamma(gamma_range=(0.8, 1.2), p=0.3),
+                    RandomNoise(mode="gaussian", sigma=0.03, p=0.3),
+                    # Regularization
+                    RandomCutout(p=0.3, size=64),
                 ]
             )
             if mode == "train"
@@ -106,30 +146,65 @@ class UAVid(Dataset):
         print(f"[INFO] UAVid dataset loaded: {self.len} samples ({mode})")
 
     def __getitem__(self, idx):
-        name = self.imnames[idx]
-        try:
-            img_path = self.imgs[name]
-            lb_path = self.labels[name]
+        fn = self.imnames[idx]
+        impth = self.imgs[fn]
+        lbpth = self.labels[fn]
 
-            img = Image.open(img_path).convert("RGB")
-            label_img = Image.open(lb_path)  # Grayscale, pixel value = trainId
+        img = Image.open(impth).convert("RGB")  # (3840, 2160, 3)
+        label = Image.open(lbpth)  # (3840, 2160), mode='L', values=trainId
 
-            # Apply augmentations
-            if self.trans_train is not None:
-                im_lb = {"im": img, "lb": label_img}
-                im_lb = self.trans_train(im_lb)
-                img, label_img = im_lb["im"], im_lb["lb"]
+        w, h = img.size  # Should be 3840 x 2160
+        if w != 3840 or h != 2160:
+            # Resize only if needed (e.g., test set might vary)
+            img = img.resize((3840, 2160), Image.BILINEAR)
+            label = label.resize((3840, 2160), Image.NEAREST)
 
-            # To tensor
-            img = self.to_tensor(img)
-            label = np.array(label_img, dtype=np.int64)
-            label = torch.from_numpy(label).long()
+        half_w, half_h = w // 2, h // 2  # 1920, 1080
 
-            return img, label
+        img_patches = []
+        label_patches = []
 
-        except Exception as e:
-            print(f"[ERROR] Failed to load {name}: {e}")
-            return self.__getitem__(np.random.randint(0, len(self)))
+        # Define the four quadrants
+        patches = [
+            (0, 0, half_w, half_h),  # top-left
+            (half_w, 0, w, half_h),  # top-right
+            (0, half_h, half_w, h),  # bottom-left
+            (half_w, half_h, w, h),  # bottom-right
+        ]
+
+        for i, (left, upper, right, lower) in enumerate(patches):
+            box = (left, upper, right, lower)
+
+            # Crop image and label
+            img_patch = img.crop(box)
+            label_patch = label.crop(box)
+
+            # Apply training augmentations (optional: shared RNG for consistency?)
+            if self.mode == "train" and self.trans_train is not None:
+                im_lb = {"im": img_patch, "lb": label_patch}
+                try:
+                    im_lb = self.trans_train(im_lb)
+                    img_patch, label_patch = im_lb["im"], im_lb["lb"]
+                except Exception as e:
+                    print(f"[WARN] Augmentation failed on patch {i} of {fn}: {e}")
+
+            # Convert to tensor
+            img_tensor = self.to_tensor(img_patch)  # (3, H, W)
+
+            # Convert label to numpy -> long tensor
+            label_np = np.array(label_patch, dtype=np.int64)
+            label_tensor = torch.from_numpy(label_np).long()  # (H, W)
+
+            img_patches.append(img_tensor)
+            label_patches.append(label_tensor)
+
+        # Return list of patches (will be flattened in collate_fn)
+        return {
+            "img_patches": img_patches,
+            "label_patches": label_patches,
+            "name": fn,
+            "original_size": (h, w),
+        }
 
     def __len__(self):
         return self.len
