@@ -4,19 +4,19 @@ With the increasing demand of autonomous systems, pixelwise semantic segmentatio
 
 An overall model architecture of Context Aggregation Network is shown in the figure below. The spatial and context branches allow for multi-scale feature extraction with significantly low computations. Fusion block (FFM) assists in feature normalization and selection for optimal scene segmentation. The bottleneck in the context branch allows for a deep supervision into the representational learning of the attention blocks.
 
-![title](imgs/cabinet.jpg)
+![title](../imgs/cabinet.jpg)
 
 ## Results on Cityscapes
 
 Semantic segmentation results on the Cityscapes validation set are shown below. First row consists of the input RGB images; the second row shows the prediction results of SwiftNet (Orsic et al., 2019); the third row shows the predictions from our model and the red boxes show the regions of improvements, and the last row comprises of the ground truth of the input images.
 
-![title](imgs/citys.jpg)
+![title](../imgs/citys.jpg)
 
 ## Results on UAVid
 
 Semantic segmentation results on the UAVid (Lyu et al., 2020) validation set shown below. First column consists of the input RGB images. Second column contains the predictions from our SOTA (Lyu et al., 2020) and the third column contains the predictions from our model. White boxes highlight the regions of improvement over the state-of-the-art (Lyu et al., 2020).
 
-![title](imgs/uavid_r.jpg)
+![title](../imgs/uavid_r.jpg)
 
 ## Setup Requirements
 
