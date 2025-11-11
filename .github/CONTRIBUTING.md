@@ -50,7 +50,7 @@ We actively welcome your pull requests:
 
 ```bash
 # Clone your fork
-git clone https://github.com/YOUR_USERNAME/CABiNet.git
+git clone https://github.com/dronefreak/CABiNet.git
 cd CABiNet
 
 # Create conda environment
