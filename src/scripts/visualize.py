@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from src.datasets.cityscapes import CityScapes
 from src.models.cabinet import CABiNet
+from src.models.constants import CITYSCAPES_NUM_CLASSES, VISUALIZATION_SAMPLE_LIMIT
 from src.utils.logger import RichConsoleManager
 
 console = RichConsoleManager.get_console()
@@ -64,13 +65,23 @@ def colorize_mask(mask: np.ndarray) -> Image.Image:
 def infer_image(
     model: torch.nn.Module,
     img_tensor: torch.Tensor,
+    num_classes: int = CITYSCAPES_NUM_CLASSES,
     scales: list = [1.0],
     flip: bool = False,
     device: torch.device = "cuda",
 ):
     """Multi-scale + flip inference on a single image tensor (C, H, W) or (1, C, H, W).
 
-    Returns predicted label map (H, W).
+    Args:
+        model: Neural network model
+        img_tensor: Input image tensor
+        num_classes: Number of segmentation classes
+        scales: List of scales for multi-scale inference
+        flip: Whether to use horizontal flip augmentation
+        device: Torch device for computation
+
+    Returns:
+        Predicted label map (H, W).
     """
     model.eval()
 
@@ -82,7 +93,7 @@ def infer_image(
     B, C, H, W = img_tensor.shape
     assert B == 1, "Only supports one image at a time"
 
-    probs = torch.zeros((1, 19, H, W), device=device)
+    probs = torch.zeros((1, num_classes, H, W), device=device)
 
     for scale in scales:
         if scale == 1.0:
@@ -175,7 +186,7 @@ def visualize_predictions(
             gt_color = colorize_mask(lb_np)
             gt_color.save(save_dir / "gt.png")
 
-        if i > 50:  # Limit for demo
+        if i > VISUALIZATION_SAMPLE_LIMIT:  # Limit for demo
             break
 
     console.print("✅ Visualization complete!")

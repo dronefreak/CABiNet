@@ -3,50 +3,19 @@
 
 from pathlib import Path
 from typing import Optional, Tuple
+import logging
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from src.models.cab import ContextAggregationBlock
+from src.models.constants import MODEL_CONFIG
+from src.models.layers import DepthwiseConv, DepthwiseSeparableConv
 from src.models.mobilenetv3 import MobileNetV3
+from src.utils.exceptions import ModelLoadError
 
-
-class _DWConv(nn.Module):
-    """Depthwise Convolution."""
-
-    def __init__(self, dw_channels: int, out_channels: int, stride: int = 1):
-        super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(
-                dw_channels, out_channels, 3, stride, 1, groups=dw_channels, bias=False
-            ),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(True),
-        )
-
-    def forward(self, x):
-        return self.conv(x)
-
-
-class _DSConv(nn.Module):
-    """Depthwise Separable Convolution."""
-
-    def __init__(self, dw_channels: int, out_channels: int, stride: int = 1):
-        super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(
-                dw_channels, dw_channels, 3, stride, 1, groups=dw_channels, bias=False
-            ),
-            nn.BatchNorm2d(dw_channels),
-            nn.ReLU(True),
-            nn.Conv2d(dw_channels, out_channels, 1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(True),
-        )
-
-    def forward(self, x):
-        return self.conv(x)
+logger = logging.getLogger(__name__)
 
 
 class ConvBNReLU(nn.Module):
@@ -73,10 +42,12 @@ class ConvBNReLU(nn.Module):
         self.relu = nn.ReLU(inplace=True)  # Save memory
         self.init_weight()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through Conv-BN-ReLU block."""
         return self.relu(self.bn(self.conv(x)))
 
-    def init_weight(self):
+    def init_weight(self) -> None:
+        """Initialize convolution weights using Kaiming initialization."""
         nn.init.kaiming_normal_(self.conv.weight, a=1)
         if self.conv.bias is not None:
             nn.init.constant_(self.conv.bias, 0)
@@ -103,7 +74,15 @@ class AttentionBranch(nn.Module):
 
         self.init_weight()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass through attention branch.
+
+        Args:
+            x: Input feature tensor
+
+        Returns:
+            Tuple of (low_res_out, high_res_out) tensors
+        """
         feat = self.conva(x)
         feat = self.a2block(feat)
         low_res_out = self.convb(feat)  # This is feat_ab_final analog
@@ -116,7 +95,8 @@ class AttentionBranch(nn.Module):
 
         return low_res_out, high_res_out
 
-    def init_weight(self):
+    def init_weight(self) -> None:
+        """Initialize layer weights."""
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, a=1)
@@ -135,7 +115,15 @@ class SpatialBranch(nn.Module):
         self.conv3 = ConvBNReLU(64, 64, kernel_size=3, stride=2, padding=1)
         self.conv_out = ConvBNReLU(64, 128, kernel_size=1, stride=1, padding=0)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through spatial branch.
+
+        Args:
+            x: Input tensor
+
+        Returns:
+            Spatial features
+        """
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.conv3(x)
@@ -173,7 +161,15 @@ class CABiNetOutput(nn.Module):
         self.conv = ConvBNReLU(in_chan, mid_chan, kernel_size=3, padding=1)
         self.conv_out = nn.Conv2d(mid_chan, n_classes, kernel_size=1, bias=False)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through output layer.
+
+        Args:
+            x: Input feature tensor
+
+        Returns:
+            Class predictions
+        """
         x = self.conv(x)
         return self.conv_out(x)
 
@@ -192,7 +188,12 @@ class CABiNet(nn.Module):
             cfgs=cfgs, mode=mode, num_classes=n_classes, weights=backbone_weights
         )
 
-        self.attention_planes = 960 if mode == "large" else 576
+        # Use configuration constants instead of hardcoded values
+        config = MODEL_CONFIG.get(mode)
+        if config is None:
+            raise ValueError(f"Invalid mode: {mode}. Must be 'large' or 'small'")
+        self.attention_planes = config["attention_planes"]
+
         # Only load custom weights if provided
         if backbone_weights is not None:
             try:
@@ -202,11 +203,11 @@ class CABiNet(nn.Module):
                     k: v for k, v in state_dict.items() if k.startswith("features")
                 }
                 self.mobile.load_state_dict(filtered_state_dict, strict=False)
-                print(f"[INFO] Loaded backbone weights from {backbone_weights}")
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed to load backbone weights from {backbone_weights}: {e}"
-                )
+                logger.info(f"Loaded backbone weights from {backbone_weights}")
+            except FileNotFoundError as e:
+                raise ModelLoadError(str(backbone_weights), f"File not found: {e}")
+            except (RuntimeError, KeyError) as e:
+                raise ModelLoadError(str(backbone_weights), f"Invalid state dict: {e}")
 
         self.ab = AttentionBranch(self.attention_planes, 256, 256, n_classes)
         self.sb = SpatialBranch()

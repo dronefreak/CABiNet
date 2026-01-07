@@ -1,6 +1,7 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
+import logging
 import os
 from pathlib import Path
 import random
@@ -9,18 +10,20 @@ import hydra
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
 import torch
-
-# import torch.distributed as dist
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.datasets.cityscapes import CityScapes
 from src.datasets.uavid import UAVid, uavid_collate_fn
 from src.models.cabinet import CABiNet
+from src.models.constants import OHEM_DIVISOR, DEFAULT_SCORE_THRESHOLD, DEFAULT_EVAL_SCALES
 from src.scripts.evaluate import MscEvalV0
+from src.utils.exceptions import TrainingError, ConfigurationError
 from src.utils.logger import RichConsoleManager
 from src.utils.loss import OhemCELoss
 from src.utils.optimizer import Optimizer
+
+logger = logging.getLogger(__name__)
 
 
 def seed_everything(seed: int):
@@ -124,14 +127,17 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     net.to(device)
     console.log("Model moved to device!", style="info")
     """Define Loss Functions."""
-    score_thres = 0.7
-    # Fix: Ensure n_min is at least 1 and correctly computed
-    n_min = batch_size * cropsize[0] * cropsize[1] // 16
+    score_thres = DEFAULT_SCORE_THRESHOLD
+    # Ensure n_min is at least 1 and correctly computed using constant
+    n_min = batch_size * cropsize[0] * cropsize[1] // OHEM_DIVISOR
     n_min = max(1, n_min)  # Prevent zero/negative
 
     # Get class weights from config
     if cfg.training_config.class_balancing:
-        weight = torch.tensor(cfg.dataset.class_weights).float().to(device)
+        try:
+            weight = torch.tensor(cfg.dataset.class_weights).float().to(device)
+        except (AttributeError, KeyError) as e:
+            raise ConfigurationError(f"Invalid class_weights in config: {e}")
     else:
         weight = None
 
@@ -295,7 +301,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         device=device,
         n_classes=n_classes,
         ignore_label=ignore_idx,
-        scales=[0.5, 0.75, 1.0, 1.25, 1.5, 1.75],
+        scales=DEFAULT_EVAL_SCALES,
         flip=True,
     )
     results = evaluator.evaluate()
