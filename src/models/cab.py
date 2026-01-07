@@ -1,9 +1,13 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from src.models.layers import DepthwiseConv
 
 
 class PSPModule(nn.Module):
@@ -22,7 +26,15 @@ class PSPModule(nn.Module):
         # Optional: Use 1x1 conv to reduce channel count after pooling
         self.conv_out = nn.Conv2d(len(sizes) * in_channels, in_channels, kernel_size=1)
 
-    def forward(self, feats):
+    def forward(self, feats: torch.Tensor) -> torch.Tensor:
+        """Forward pass through pyramid pooling module.
+
+        Args:
+            feats: Input feature tensor of shape (N, C, H, W)
+
+        Returns:
+            Multi-scale aggregated features
+        """
         h, w = feats.size(2), feats.size(3)
         priors = []
         for pool in self.stages:
@@ -86,7 +98,15 @@ class ReducedGlobalAttention(nn.Module):
         if self.W.bias is not None:
             nn.init.constant_(self.W.bias, 0)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through global attention module.
+
+        Args:
+            x: Input feature tensor
+
+        Returns:
+            Context-enhanced features
+        """
         batch_size, c, h, w = x.shape
 
         # Optional downsampling
@@ -140,16 +160,24 @@ class LocalAttention(nn.Module):
     Enhances features using depthwise convs and sigmoid gating.
     """
 
-    def __init__(self, inplane):
+    def __init__(self, inplane: int) -> None:
         super(LocalAttention, self).__init__()
         self.dwconv = nn.Sequential(
-            _DWConv(inplane, inplane, stride=1),  # Keep spatial size
-            _DWConv(inplane, inplane, stride=1),
-            _DWConv(inplane, inplane, stride=1),
+            DepthwiseConv(inplane, inplane, stride=1),  # Keep spatial size
+            DepthwiseConv(inplane, inplane, stride=1),
+            DepthwiseConv(inplane, inplane, stride=1),
         )
         self.sigmoid = nn.Sigmoid()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through local attention module.
+
+        Args:
+            x: Input feature tensor
+
+        Returns:
+            Refined features with residual connection
+        """
         residual = x
         mask = self.dwconv(x)
         mask = self.sigmoid(mask)
@@ -177,7 +205,15 @@ class ContextAggregationBlock(nn.Module):
         self.local_attn = LocalAttention(inplane)
         self.gamma = nn.Parameter(torch.zeros(1))  # Learnable weight for global path
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass through context aggregation block.
+
+        Args:
+            x: Input feature tensor
+
+        Returns:
+            Aggregated features combining global and local context
+        """
         # Global context path
         global_feat = self.global_attn(x)
         global_feat = global_feat * self.gamma
@@ -189,22 +225,6 @@ class ContextAggregationBlock(nn.Module):
         return global_feat + local_feat
 
 
-# Reuse consistent _DWConv (same as in cabinet.py)
-class _DWConv(nn.Module):
-    """Depthwise Convolution."""
-
-    def __init__(self, dw_channels, out_channels, stride=1):
-        super(_DWConv, self).__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(
-                dw_channels, out_channels, 3, stride, 1, groups=dw_channels, bias=False
-            ),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(True),
-        )
-
-    def forward(self, x):
-        return self.conv(x)
 
 
 if __name__ == "__main__":

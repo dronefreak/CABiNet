@@ -11,6 +11,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from src.models.constants import EVAL_STRIDE_RATE
+
 # For optional distributed support
 try:
     import torch.distributed as dist
@@ -84,7 +86,7 @@ class MscEvalV0(object):
             fused probability map: (N, n_classes, H, W)
         """
         cropsize = self.cropsize
-        stride_rate = 5 / 6.0
+        stride_rate = EVAL_STRIDE_RATE
         N, C, H, W = image.shape
 
         # Case 1: Image smaller than cropsize
