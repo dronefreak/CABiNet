@@ -1,5 +1,16 @@
-# src/datasets/transform.py
+"""Data augmentation transforms for semantic segmentation.
+
+This module provides various transformation classes for augmenting image and label pairs
+during training. All transforms operate on dictionaries with 'im' (image) and 'lb' (label) keys.
+
+Transforms include:
+- Geometric: RandomScale, RandomHorizontalFlip, RandomCrop, RandomRotate
+- Photometric: RandomColorJitter, RandomGamma, RandomNoise, RandomGrayscale
+- Regularization: RandomCutout, RandomGaussianBlur
+"""
+
 import random
+from typing import Dict, Tuple, Optional
 
 from PIL import Image, ImageEnhance
 import numpy as np

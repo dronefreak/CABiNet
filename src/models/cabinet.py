@@ -217,8 +217,15 @@ class CABiNet(nn.Module):
         self.conv_out = CABiNetOutput(256, 256, n_classes)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass through CABiNet model.
+
+        Args:
+            x: Input tensor of shape (N, 3, H, W)
+
+        Returns:
+            Tuple of (final_logit, high_res_logit_up) each of shape (N, num_classes, H, W)
+        """
         H, W = x.shape[2:]
-        # device = x.device
 
         # Extract features
         feat_sb = self.sb(x)  # (B, 128, H/8, W/8)

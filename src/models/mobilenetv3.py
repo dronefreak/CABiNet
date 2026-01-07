@@ -35,21 +35,31 @@ def _make_divisible(v, divisor, min_value=None):
     return new_v
 
 
-class h_sigmoid(torch.nn.Module):
-    def __init__(self, inplace=True):
-        super(h_sigmoid, self).__init__()
+class HardSigmoid(torch.nn.Module):
+    """Hard Sigmoid activation function.
+
+    Approximates sigmoid using ReLU6: relu6(x + 3) / 6
+    """
+    def __init__(self, inplace: bool = True) -> None:
+        super(HardSigmoid, self).__init__()
         self.relu = torch.nn.ReLU6(inplace=inplace)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply hard sigmoid activation."""
         return self.relu(x + 3) / 6
 
 
-class h_swish(torch.nn.Module):
-    def __init__(self, inplace=True):
-        super(h_swish, self).__init__()
-        self.sigmoid = h_sigmoid(inplace=inplace)
+class HardSwish(torch.nn.Module):
+    """Hard Swish activation function.
 
-    def forward(self, x):
+    Swish approximation: x * hard_sigmoid(x)
+    """
+    def __init__(self, inplace: bool = True) -> None:
+        super(HardSwish, self).__init__()
+        self.sigmoid = HardSigmoid(inplace=inplace)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply hard swish activation."""
         return x * self.sigmoid(x)
 
 
@@ -61,7 +71,7 @@ class SELayer(torch.nn.Module):
             torch.nn.Linear(channel, _make_divisible(channel // reduction, 8)),
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(_make_divisible(channel // reduction, 8), channel),
-            h_sigmoid(),
+            HardSigmoid(),
         )
 
     def forward(self, x):
@@ -75,7 +85,7 @@ def conv_3x3_bn(inp, oup, stride):
     return torch.nn.Sequential(
         torch.nn.Conv2d(inp, oup, 3, stride, 1, bias=False),
         torch.nn.BatchNorm2d(oup),
-        h_swish(),
+        HardSwish(),
     )
 
 
@@ -83,7 +93,7 @@ def conv_1x1_bn(inp, oup):
     return torch.nn.Sequential(
         torch.nn.Conv2d(inp, oup, 1, 1, 0, bias=False),
         torch.nn.BatchNorm2d(oup),
-        h_swish(),
+        HardSwish(),
     )
 
 
@@ -107,7 +117,7 @@ class InvertedResidual(torch.nn.Module):
                     bias=False,
                 ),
                 torch.nn.BatchNorm2d(hidden_dim),
-                h_swish() if use_hs else torch.nn.ReLU(inplace=True),
+                HardSwish() if use_hs else torch.nn.ReLU(inplace=True),
                 # Squeeze-and-Excite
                 SELayer(hidden_dim) if use_se else torch.nn.Identity(),
                 # pw-linear
@@ -119,7 +129,7 @@ class InvertedResidual(torch.nn.Module):
                 # pw
                 torch.nn.Conv2d(inp, hidden_dim, 1, 1, 0, bias=False),
                 torch.nn.BatchNorm2d(hidden_dim),
-                h_swish() if use_hs else torch.nn.ReLU(inplace=True),
+                HardSwish() if use_hs else torch.nn.ReLU(inplace=True),
                 # dw
                 torch.nn.Conv2d(
                     hidden_dim,
@@ -133,7 +143,7 @@ class InvertedResidual(torch.nn.Module):
                 torch.nn.BatchNorm2d(hidden_dim),
                 # Squeeze-and-Excite
                 SELayer(hidden_dim) if use_se else torch.nn.Identity(),
-                h_swish() if use_hs else torch.nn.ReLU(inplace=True),
+                HardSwish() if use_hs else torch.nn.ReLU(inplace=True),
                 # pw-linear
                 torch.nn.Conv2d(hidden_dim, oup, 1, 1, 0, bias=False),
                 torch.nn.BatchNorm2d(oup),
@@ -178,7 +188,7 @@ class MobileNetV3(torch.nn.Module):
         )
         self.classifier = torch.nn.Sequential(
             torch.nn.Linear(exp_size, output_channel),
-            h_swish(),
+            HardSwish(),
             torch.nn.Dropout(0.2),
             torch.nn.Linear(output_channel, num_classes),
         )
