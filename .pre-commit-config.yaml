@@ -1,52 +1,142 @@
-# Note about ignore: pre-commit will ignore anything that is already ignored by Git.
+# Pre-commit hooks for CABiNet project
+# Note: pre-commit will ignore anything that is already ignored by Git.
+
+default_language_version:
+  python: python3.10
+
 repos:
-  - repo: https://github.com/ambv/black
+  # Python code formatting
+  - repo: https://github.com/psf/black
     rev: 25.1.0
     hooks:
       - id: black
-        language_version: python
+        language_version: python3
+        args: [--line-length=100]
+        exclude: ^(legacy/|.*\.ipynb)
+
+  # Import sorting
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        language_version: python3
+        args: [--profile=black, --line-length=100]
+        exclude: ^(legacy/|.*\.ipynb)
+
+  # Linting
   - repo: https://github.com/pycqa/flake8
     rev: 7.3.0
     hooks:
       - id: flake8
-        language_version: python
-        additional_dependencies: ["pep8-naming==0.12.1"]
+        language_version: python3
+        additional_dependencies: [
+          "flake8-docstrings",
+          "flake8-bugbear",
+          "flake8-comprehensions",
+          "pep8-naming",
+        ]
+        args: [--max-line-length=100, --extend-ignore=E203,W503]
+        exclude: ^(legacy/|tests/|.*\.ipynb)
+
+  # Type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.0
+    hooks:
+      - id: mypy
+        language_version: python3
+        additional_dependencies: [types-all]
+        args: [--ignore-missing-imports, --check-untyped-defs]
+        exclude: ^(tests/|legacy/|.*\.ipynb)
+
+  # Security checks
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        args: [-ll, -r, src/]
+        exclude: ^(tests/|legacy/)
+
+  # Standard pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: check-added-large-files
-        args: ["--maxkb=500"]
-      - id: check-docstring-first
+        args: [--maxkb=1000]  # Increased for model weights
+      - id: check-ast  # Validate Python syntax
+      - id: check-builtin-literals  # Require literal syntax
+      - id: check-case-conflict  # Check for files with case conflicts
+      - id: check-docstring-first  # Ensure docstring before code
+      - id: check-executables-have-shebangs
       - id: check-json
       - id: check-merge-conflict
       - id: check-symlinks
       - id: check-toml
-      - id: check-xml
       - id: check-yaml
-      - id: detect-private-key
+        args: [--unsafe]  # Allow custom YAML tags
+      - id: debug-statements  # Check for debugger imports
+      - id: detect-private-key  # Detect private keys
+      - id: end-of-file-fixer  # Ensure files end with newline
+      - id: mixed-line-ending  # Fix mixed line endings
+        args: [--fix=lf]
+      - id: trailing-whitespace  # Remove trailing whitespace
+        args: [--markdown-linebreak-ext=md]
 
-  - repo: https://github.com/timothycrosley/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
-        language_version: python
-        additional_dependencies: ["isort[colors]==5.12.0"]
-
+  # Docstring formatting
   - repo: https://github.com/PyCQA/docformatter
     rev: v1.7.7
     hooks:
       - id: docformatter
-        args: [--in-place, --wrap-summaries=88, --wrap-descriptions=88]
+        args: [
+          --in-place,
+          --wrap-summaries=100,
+          --wrap-descriptions=100,
+          --make-summary-multi-line,
+        ]
+        exclude: ^(legacy/|.*\.ipynb)
 
+  # Upgrade Python syntax
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.19.1
+    hooks:
+      - id: pyupgrade
+        args: [--py38-plus]
+        exclude: ^(legacy/|.*\.ipynb)
+
+  # YAML/JSON/TOML formatting
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v4.0.0-alpha.8
     hooks:
       - id: prettier
-        types_or: [markdown, yaml, json, xml, toml]
+        types_or: [yaml, json, toml, markdown]
+        exclude: ^(legacy/)
 
-  - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v16.0.6
+  # Jupyter notebook cleaning (optional)
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.8.1
     hooks:
-      - id: clang-format
-        files: '\.(cpp|cxx|cc|hpp|hxx|hh)$'
-        exclude: "third_party|generated"
+      - id: nbstripout
+        description: Strip output from Jupyter notebooks
+
+  # Check for TODO/FIXME comments (warning only)
+  - repo: https://github.com/pre-commit/mirrors-pylint
+    rev: v3.3.1
+    hooks:
+      - id: pylint
+        args: [
+          --disable=all,
+          --enable=fixme,
+          --notes=TODO,FIXME,XXX,
+        ]
+        exclude: ^(tests/|legacy/)
+        stages: [manual]  # Only run when explicitly called
+
+# Configuration for specific hooks
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: [pylint]  # Skip slow hooks in CI
+  submodules: false
