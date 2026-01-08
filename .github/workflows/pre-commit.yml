@@ -2,7 +2,7 @@ name: Pre-commit Checks
 
 on:
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, master, claude/* ]
 
 jobs:
   pre-commit:
