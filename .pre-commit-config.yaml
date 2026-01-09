@@ -44,7 +44,7 @@ repos:
     hooks:
       - id: mypy
         language_version: python3
-        additional_dependencies: [types-all]
+        additional_dependencies: [types-PyYAML, numpy]
         args: [--ignore-missing-imports, --check-untyped-defs]
         exclude: ^(tests/|legacy/|.*\.ipynb)
 
