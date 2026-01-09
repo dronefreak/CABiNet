@@ -1,142 +1,70 @@
-# Pre-commit hooks for CABiNet project
-# Note: pre-commit will ignore anything that is already ignored by Git.
+# Pre-commit hooks configuration
+# See https://pre-commit.com for more information
 
 default_language_version:
-  python: python3.10
+  python: python3
 
 repos:
-  # Python code formatting
+  # ---------- BASIC SANITY ----------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=5000]
+      - id: check-ast
+      - id: debug-statements
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # ---------- PYTHON FORMAT ----------
   - repo: https://github.com/psf/black
-    rev: 25.1.0
+    rev: 25.12.0
     hooks:
       - id: black
-        language_version: python3
-        args: [--line-length=100]
-        exclude: ^(legacy/|.*\.ipynb)
+        args: [--line-length=88]
 
-  # Import sorting
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+  # ---------- PYTHON LINT (NO FIX) ----------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.10
     hooks:
-      - id: isort
-        language_version: python3
-        args: [--profile=black, --line-length=100]
-        exclude: ^(legacy/|.*\.ipynb)
+      - id: ruff
+        args: [--fix]
+        types_or: [python, pyi]
 
-  # Linting
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.3.0
-    hooks:
-      - id: flake8
-        language_version: python3
-        additional_dependencies: [
-          "flake8-docstrings",
-          "flake8-bugbear",
-          "flake8-comprehensions",
-          "pep8-naming",
-        ]
-        args: [--max-line-length=100, --extend-ignore=E203,W503]
-        exclude: ^(legacy/|tests/|.*\.ipynb)
-
-  # Type checking
+  # ---------- TYPES ----------
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.0
+    rev: v1.19.1
     hooks:
       - id: mypy
-        language_version: python3
-        additional_dependencies: [types-PyYAML, numpy]
         args: [--ignore-missing-imports, --check-untyped-defs]
-        exclude: ^(tests/|legacy/|.*\.ipynb)
+        additional_dependencies:
+          - types-PyYAML
+          - types-requests
+        files: ^src/
 
-  # Security checks
+  # ---------- SECURITY ----------
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.8.0
+    rev: 1.9.2
     hooks:
       - id: bandit
-        args: [-ll, -r, src/]
-        exclude: ^(tests/|legacy/)
+        args: [-c, pyproject.toml, -r, src/]
+        additional_dependencies: ["bandit[toml]"]
 
-  # Standard pre-commit hooks
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
-    hooks:
-      - id: check-added-large-files
-        args: [--maxkb=1000]  # Increased for model weights
-      - id: check-ast  # Validate Python syntax
-      - id: check-builtin-literals  # Require literal syntax
-      - id: check-case-conflict  # Check for files with case conflicts
-      - id: check-docstring-first  # Ensure docstring before code
-      - id: check-executables-have-shebangs
-      - id: check-json
-      - id: check-merge-conflict
-      - id: check-symlinks
-      - id: check-toml
-      - id: check-yaml
-        args: [--unsafe]  # Allow custom YAML tags
-      - id: debug-statements  # Check for debugger imports
-      - id: detect-private-key  # Detect private keys
-      - id: end-of-file-fixer  # Ensure files end with newline
-      - id: mixed-line-ending  # Fix mixed line endings
-        args: [--fix=lf]
-      - id: trailing-whitespace  # Remove trailing whitespace
-        args: [--markdown-linebreak-ext=md]
-
-  # Docstring formatting
-  - repo: https://github.com/PyCQA/docformatter
-    rev: v1.7.7
-    hooks:
-      - id: docformatter
-        args: [
-          --in-place,
-          --wrap-summaries=100,
-          --wrap-descriptions=100,
-          --make-summary-multi-line,
-        ]
-        exclude: ^(legacy/|.*\.ipynb)
-
-  # Upgrade Python syntax
-  - repo: https://github.com/asottile/pyupgrade
-    rev: v3.19.1
-    hooks:
-      - id: pyupgrade
-        args: [--py38-plus]
-        exclude: ^(legacy/|.*\.ipynb)
-
-  # YAML/JSON/TOML formatting
+  # ---------- NON-PYTHON FORMAT ----------
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v4.0.0-alpha.8
     hooks:
       - id: prettier
-        types_or: [yaml, json, toml, markdown]
-        exclude: ^(legacy/)
+        types_or: [yaml, markdown, json]
 
-  # Jupyter notebook cleaning (optional)
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.8.1
+  # ---------- COMMIT MSG ----------
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.3.0
     hooks:
-      - id: nbstripout
-        description: Strip output from Jupyter notebooks
-
-  # Check for TODO/FIXME comments (warning only)
-  - repo: https://github.com/pre-commit/mirrors-pylint
-    rev: v2.7.4
-    hooks:
-      - id: pylint
-        args: [
-          --disable=all,
-          --enable=fixme,
-          --notes=TODO,FIXME,XXX,
-        ]
-        exclude: ^(tests/|legacy/)
-        stages: [manual]  # Only run when explicitly called
-
-# Configuration for specific hooks
-ci:
-  autofix_commit_msg: |
-    [pre-commit.ci] auto fixes from pre-commit hooks
-  autofix_prs: true
-  autoupdate_branch: ''
-  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
-  autoupdate_schedule: weekly
-  skip: [pylint]  # Skip slow hooks in CI
-  submodules: false
+      - id: conventional-pre-commit
+        stages: [commit-msg]

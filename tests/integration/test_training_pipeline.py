@@ -4,7 +4,6 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.models.cabinet import CABiNet
 from src.utils.loss import OhemCELoss
 from src.utils.optimizer import Optimizer
 

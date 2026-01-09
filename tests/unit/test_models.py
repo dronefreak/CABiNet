@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from src.models.cab import ContextAggregationBlock, PSPModule
-from src.models.cabinet import AttentionBranch, CABiNet, ConvBNReLU, SpatialBranch
+from src.models.cabinet import AttentionBranch, ConvBNReLU, SpatialBranch
 from src.models.constants import MODEL_CONFIG
 from src.models.layers import DepthwiseConv, DepthwiseSeparableConv
 
