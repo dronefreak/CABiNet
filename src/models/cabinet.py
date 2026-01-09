@@ -1,9 +1,9 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
+import logging
 from pathlib import Path
 from typing import Optional, Tuple
-import logging
 
 import torch
 import torch.nn as nn
@@ -11,7 +11,6 @@ import torch.nn.functional as F
 
 from src.models.cab import ContextAggregationBlock
 from src.models.constants import MODEL_CONFIG
-from src.models.layers import DepthwiseConv, DepthwiseSeparableConv
 from src.models.mobilenetv3 import MobileNetV3
 from src.utils.exceptions import ModelLoadError
 

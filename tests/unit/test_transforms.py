@@ -1,18 +1,18 @@
 """Unit tests for data transformation functions."""
 
-import pytest
-import numpy as np
 from PIL import Image
+import numpy as np
+import pytest
 
 from src.datasets.transform import (
-    RandomScale,
-    RandomHorizontalFlip,
-    RandomCrop,
+    Compose,
     RandomColorJitter,
+    RandomCrop,
     RandomCutout,
     RandomGamma,
+    RandomHorizontalFlip,
     RandomNoise,
-    Compose,
+    RandomScale,
 )
 
 
@@ -139,7 +139,9 @@ class TestRandomCutout:
         transform = RandomCutout(p=0.0, size=32)
         result = transform(sample_image_label)
 
-        assert np.array_equal(np.array(result["im"]), np.array(sample_image_label["im"]))
+        assert np.array_equal(
+            np.array(result["im"]), np.array(sample_image_label["im"])
+        )
 
 
 class TestRandomGamma:
@@ -158,7 +160,9 @@ class TestRandomGamma:
         transform = RandomGamma(gamma_range=(0.8, 1.2), p=0.0)
         result = transform(sample_image_label)
 
-        assert np.array_equal(np.array(result["im"]), np.array(sample_image_label["im"]))
+        assert np.array_equal(
+            np.array(result["im"]), np.array(sample_image_label["im"])
+        )
 
 
 class TestRandomNoise:
@@ -178,7 +182,9 @@ class TestRandomNoise:
         transform = RandomNoise(mode="gaussian", sigma=0.05, p=0.0)
         result = transform(sample_image_label)
 
-        assert np.array_equal(np.array(result["im"]), np.array(sample_image_label["im"]))
+        assert np.array_equal(
+            np.array(result["im"]), np.array(sample_image_label["im"])
+        )
 
 
 class TestCompose:
@@ -186,11 +192,13 @@ class TestCompose:
 
     def test_compose_multiple_transforms(self, sample_image_label):
         """Test composing multiple transformations."""
-        transform = Compose([
-            RandomScale(scales=[1.0]),
-            RandomHorizontalFlip(p=0.0),
-            RandomCrop(size=(128, 128)),
-        ])
+        transform = Compose(
+            [
+                RandomScale(scales=[1.0]),
+                RandomHorizontalFlip(p=0.0),
+                RandomCrop(size=(128, 128)),
+            ]
+        )
 
         result = transform(sample_image_label)
 

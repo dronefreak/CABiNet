@@ -1,10 +1,13 @@
 """Pytest configuration and shared fixtures."""
 
+from pathlib import Path
+
+import numpy as np
 import pytest
 import torch
-import numpy as np
-from pathlib import Path
+
 from src.models.cabinet import CABiNet
+
 
 @pytest.fixture
 def device():
@@ -87,6 +90,7 @@ def mock_config():
         },
     }
 
+
 @pytest.fixture
 def mock_small_model():
     """Factory fixture to create CABiNet models with configurable mode and number of classes."""
@@ -110,6 +114,7 @@ def mock_small_model():
         return model
 
     return _make_model
+
 
 @pytest.fixture
 def mock_large_model():

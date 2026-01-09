@@ -3,10 +3,10 @@
 import pytest
 import torch
 
-from src.models.cabinet import CABiNet, ConvBNReLU, AttentionBranch, SpatialBranch
 from src.models.cab import ContextAggregationBlock, PSPModule
-from src.models.layers import DepthwiseConv, DepthwiseSeparableConv
+from src.models.cabinet import AttentionBranch, ConvBNReLU, SpatialBranch
 from src.models.constants import MODEL_CONFIG
+from src.models.layers import DepthwiseConv, DepthwiseSeparableConv
 
 
 class TestLayerComponents:
@@ -67,7 +67,9 @@ class TestCABiNetComponents:
 
     def test_attention_branch_forward(self):
         """Test AttentionBranch forward pass."""
-        branch = AttentionBranch(inplanes=960, interplanes=256, outplanes=256, num_classes=19)
+        branch = AttentionBranch(
+            inplanes=960, interplanes=256, outplanes=256, num_classes=19
+        )
         x = torch.randn(2, 960, 32, 32)
         low_res, high_res = branch(x)
 
@@ -90,9 +92,15 @@ class TestCABiNetModel:
     """Test full CABiNet model."""
 
     @pytest.mark.parametrize("mode", ["large", "small"])
-    def test_cabinet_forward_shape(self, mode, num_classes, mock_small_model, mock_large_model):
+    def test_cabinet_forward_shape(
+        self, mode, num_classes, mock_small_model, mock_large_model
+    ):
         """Test CABiNet forward pass output shapes."""
-        model = mock_small_model(num_classes=num_classes) if mode == "small" else mock_large_model(num_classes=num_classes)
+        model = (
+            mock_small_model(num_classes=num_classes)
+            if mode == "small"
+            else mock_large_model(num_classes=num_classes)
+        )
         model.eval()
 
         x = torch.randn(2, 3, 512, 512)

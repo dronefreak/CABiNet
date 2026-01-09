@@ -22,8 +22,13 @@ class DWConv(nn.Module):
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(
-                channels, channels, kernel_size=3, stride=stride, padding=1,
-                groups=channels, bias=False
+                channels,
+                channels,
+                kernel_size=3,
+                stride=stride,
+                padding=1,
+                groups=channels,
+                bias=False,
             ),
             nn.BatchNorm2d(channels),
             nn.ReLU(inplace=True),
@@ -48,9 +53,7 @@ class PSPModule(nn.Module):
 
     def __init__(self, in_channels, sizes=(1, 3, 6, 8)):
         super().__init__()
-        self.stages = nn.ModuleList([
-            nn.AdaptiveAvgPool2d((s, s)) for s in sizes
-        ])
+        self.stages = nn.ModuleList([nn.AdaptiveAvgPool2d((s, s)) for s in sizes])
 
         self.project = nn.Conv2d(
             in_channels * (len(sizes) + 1),  # +1 for identity
@@ -98,9 +101,7 @@ class GlobalContextAttention(nn.Module):
         self.out_channels = out_channels or in_channels
 
         # Optional spatial reduction
-        self.pool = (
-            nn.MaxPool2d(kernel_size=scale) if scale > 1 else nn.Identity()
-        )
+        self.pool = nn.MaxPool2d(kernel_size=scale) if scale > 1 else nn.Identity()
 
         # Query / Key / Value projections
         self.to_query = nn.Sequential(

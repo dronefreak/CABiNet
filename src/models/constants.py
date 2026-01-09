@@ -1,6 +1,6 @@
 """Constants and configuration for CABiNet models."""
 
-from typing import Dict, Any
+from typing import Any, Dict
 
 # MobileNetV3 backbone configuration
 MOBILENET_LARGE_FEATURES = 960
