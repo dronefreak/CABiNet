@@ -1,7 +1,5 @@
 """Common reusable neural network layers for CABiNet models."""
 
-from typing import Optional
-
 import torch
 import torch.nn as nn
 

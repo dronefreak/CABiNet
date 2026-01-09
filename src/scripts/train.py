@@ -16,9 +16,13 @@ from tqdm import tqdm
 from src.datasets.cityscapes import CityScapes
 from src.datasets.uavid import UAVid, uavid_collate_fn
 from src.models.cabinet import CABiNet
-from src.models.constants import OHEM_DIVISOR, DEFAULT_SCORE_THRESHOLD, DEFAULT_EVAL_SCALES
+from src.models.constants import (
+    DEFAULT_EVAL_SCALES,
+    DEFAULT_SCORE_THRESHOLD,
+    OHEM_DIVISOR,
+)
 from src.scripts.evaluate import MscEvalV0
-from src.utils.exceptions import TrainingError, ConfigurationError
+from src.utils.exceptions import ConfigurationError
 from src.utils.logger import RichConsoleManager
 from src.utils.loss import OhemCELoss
 from src.utils.optimizer import Optimizer

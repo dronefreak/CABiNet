@@ -40,6 +40,7 @@ class HardSigmoid(torch.nn.Module):
 
     Approximates sigmoid using ReLU6: relu6(x + 3) / 6
     """
+
     def __init__(self, inplace: bool = True) -> None:
         super(HardSigmoid, self).__init__()
         self.relu = torch.nn.ReLU6(inplace=inplace)
@@ -54,6 +55,7 @@ class HardSwish(torch.nn.Module):
 
     Swish approximation: x * hard_sigmoid(x)
     """
+
     def __init__(self, inplace: bool = True) -> None:
         super(HardSwish, self).__init__()
         self.sigmoid = HardSigmoid(inplace=inplace)

@@ -1,9 +1,9 @@
 """Performance profiling utilities for CABiNet models."""
 
-import time
-from typing import Dict, Optional, Callable, Any
 from contextlib import contextmanager
 import logging
+import time
+from typing import Any, Dict, Optional
 
 import torch
 import torch.nn as nn
@@ -25,7 +25,9 @@ class PerformanceProfiler:
             device: Device to run profiling on
         """
         self.model = model
-        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
         self.model.to(self.device)
 
     @contextmanager
@@ -106,6 +108,7 @@ class PerformanceProfiler:
 
         # Calculate statistics
         import numpy as np
+
         times_array = np.array(times)
 
         results = {
@@ -119,7 +122,9 @@ class PerformanceProfiler:
             "num_iterations": num_iterations,
         }
 
-        logger.info(f"Average inference time: {results['mean_ms']:.2f} ± {results['std_ms']:.2f} ms")
+        logger.info(
+            f"Average inference time: {results['mean_ms']:.2f} ± {results['std_ms']:.2f} ms"
+        )
         logger.info(f"FPS: {results['fps']:.2f}")
 
         return results
@@ -169,7 +174,9 @@ class PerformanceProfiler:
 
         return results
 
-    def profile_model_flops(self, input_size: tuple = (1, 3, 512, 512)) -> Dict[str, Any]:
+    def profile_model_flops(
+        self, input_size: tuple = (1, 3, 512, 512)
+    ) -> Dict[str, Any]:
         """Profile model FLOPs using torch.profiler.
 
         Args:
@@ -179,14 +186,16 @@ class PerformanceProfiler:
             Dictionary with profiling information
         """
         try:
-            from torch.profiler import profile, ProfilerActivity
+            from torch.profiler import ProfilerActivity, profile
 
             dummy_input = torch.randn(input_size, device=self.device)
 
             with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]
-                if torch.cuda.is_available()
-                else [ProfilerActivity.CPU],
+                activities=(
+                    [ProfilerActivity.CPU, ProfilerActivity.CUDA]
+                    if torch.cuda.is_available()
+                    else [ProfilerActivity.CPU]
+                ),
                 record_shapes=True,
             ) as prof:
                 with torch.no_grad():
@@ -197,9 +206,11 @@ class PerformanceProfiler:
 
             results = {
                 "total_cpu_time_ms": sum(evt.cpu_time_total for evt in events) / 1000,
-                "total_cuda_time_ms": sum(evt.cuda_time_total for evt in events) / 1000
-                if torch.cuda.is_available()
-                else 0,
+                "total_cuda_time_ms": (
+                    sum(evt.cuda_time_total for evt in events) / 1000
+                    if torch.cuda.is_available()
+                    else 0
+                ),
                 "input_size": input_size,
             }
 
