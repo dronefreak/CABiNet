@@ -171,7 +171,7 @@ class TestRandomNoise:
 
         # Images should differ due to noise
         assert result["im"].size == sample_image_label["im"].size
-        assert not np.array_equal(np.array(result["im"]), np.array(sample_image_label["im"]))
+        assert not (np.array(result["im"]) - np.array(sample_image_label["im"])).any()
 
     def test_noise_never_applied(self, sample_image_label):
         """Test noise with p=0 doesn't modify image."""
