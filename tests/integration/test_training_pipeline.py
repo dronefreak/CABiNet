@@ -8,14 +8,13 @@ from src.models.cabinet import CABiNet
 from src.utils.loss import OhemCELoss
 from src.utils.optimizer import Optimizer
 
-
 class TestTrainingIntegration:
     """Integration tests for training workflow."""
 
-    def test_single_training_step(self, num_classes):
+    def test_single_training_step(self, num_classes, mock_small_model):
         """Test a single training step completes successfully."""
         # Create model
-        model = CABiNet(n_classes=num_classes, mode="large")
+        model = mock_small_model(num_classes=num_classes)
         model.train()
 
         # Create dummy data
@@ -46,9 +45,9 @@ class TestTrainingIntegration:
         assert not torch.isnan(loss)
         assert loss.item() > 0
 
-    def test_training_reduces_loss(self, num_classes):
+    def test_training_reduces_loss(self, num_classes, mock_small_model):
         """Test that training reduces loss over iterations."""
-        model = CABiNet(n_classes=num_classes, mode="small")
+        model = mock_small_model(num_classes=num_classes)
         model.train()
 
         # Create fixed dataset
@@ -80,9 +79,9 @@ class TestTrainingIntegration:
         # Loss should decrease (allow some variance)
         assert losses[-1] < losses[0], "Loss should decrease during training"
 
-    def test_dataloader_integration(self, num_classes):
+    def test_dataloader_integration(self, num_classes, mock_small_model):
         """Test training with DataLoader."""
-        model = CABiNet(n_classes=num_classes, mode="large")
+        model = mock_small_model(num_classes=num_classes)
         model.train()
 
         # Create dummy dataset
@@ -113,9 +112,9 @@ class TestTrainingIntegration:
             assert not torch.isnan(loss)
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
-    def test_training_on_cuda(self, num_classes):
+    def test_training_on_cuda(self, num_classes, mock_small_model):
         """Test training pipeline on CUDA."""
-        model = CABiNet(n_classes=num_classes, mode="large").cuda()
+        model = mock_small_model(num_classes=num_classes).cuda()
         model.train()
 
         images = torch.randn(2, 3, 256, 256).cuda()
@@ -145,9 +144,9 @@ class TestTrainingIntegration:
 class TestEvaluationIntegration:
     """Integration tests for evaluation workflow."""
 
-    def test_evaluation_mode(self, num_classes):
+    def test_evaluation_mode(self, num_classes, mock_small_model):
         """Test model evaluation mode."""
-        model = CABiNet(n_classes=num_classes, mode="large")
+        model = mock_small_model(num_classes=num_classes)
         model.eval()
 
         images = torch.randn(2, 3, 512, 512)
@@ -160,9 +159,9 @@ class TestEvaluationIntegration:
         assert not out.requires_grad
         assert not out16.requires_grad
 
-    def test_prediction_consistency(self, num_classes):
+    def test_prediction_consistency(self, num_classes, mock_small_model):
         """Test model produces consistent predictions in eval mode."""
-        model = CABiNet(n_classes=num_classes, mode="large")
+        model = mock_small_model(num_classes=num_classes)
         model.eval()
 
         torch.manual_seed(42)

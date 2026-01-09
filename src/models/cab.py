@@ -1,56 +1,86 @@
 #!/usr/bin/python
-# -*- encoding: utf-8 -*-
+# -*- coding: utf-8 -*-
 
-from typing import Tuple
+"""
+Context Aggregation Block (CAB)
+-----------------------------------------
+"""
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.models.layers import DepthwiseConv
+# -----------------------------------------------------------------------------
+# Utilities
+# -----------------------------------------------------------------------------
+
+
+class DWConv(nn.Module):
+    """Depthwise convolution block."""
+
+    def __init__(self, channels, stride=1):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(
+                channels, channels, kernel_size=3, stride=stride, padding=1,
+                groups=channels, bias=False
+            ),
+            nn.BatchNorm2d(channels),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        return self.block(x)
+
+
+# -----------------------------------------------------------------------------
+# Pyramid Spatial Pooling
+# -----------------------------------------------------------------------------
 
 
 class PSPModule(nn.Module):
-    """Pyramid Spatial Pooling Module.
+    """
+    Pyramid Spatial Pooling with residual feature preservation.
 
-    Aggregates context at multiple scales.
-    Input: (N, C, H, W)
-    Output: (N, C, H, W) — fused multi-scale features
+    Input : (B, C, H, W)
+    Output: (B, C, H, W)
     """
 
-    def __init__(self, sizes=(1, 3, 6, 8), in_channels=None):
-        super(PSPModule, self).__init__()
-        self.stages = nn.ModuleList(
-            [nn.AdaptiveAvgPool2d((size, size)) for size in sizes]
+    def __init__(self, in_channels, sizes=(1, 3, 6, 8)):
+        super().__init__()
+        self.stages = nn.ModuleList([
+            nn.AdaptiveAvgPool2d((s, s)) for s in sizes
+        ])
+
+        self.project = nn.Conv2d(
+            in_channels * (len(sizes) + 1),  # +1 for identity
+            in_channels,
+            kernel_size=1,
+            bias=False,
         )
-        # Optional: Use 1x1 conv to reduce channel count after pooling
-        self.conv_out = nn.Conv2d(len(sizes) * in_channels, in_channels, kernel_size=1)
 
-    def forward(self, feats: torch.Tensor) -> torch.Tensor:
-        """Forward pass through pyramid pooling module.
-
-        Args:
-            feats: Input feature tensor of shape (N, C, H, W)
-
-        Returns:
-            Multi-scale aggregated features
-        """
-        h, w = feats.size(2), feats.size(3)
-        priors = []
+    def forward(self, x):
+        h, w = x.shape[2:]
+        priors = [x]
         for pool in self.stages:
-            pooled = pool(feats)
-            upsampled = F.interpolate(
+            pooled = pool(x)
+            pooled = F.interpolate(
                 pooled, size=(h, w), mode="bilinear", align_corners=False
             )
-            priors.append(upsampled)
+            priors.append(pooled)
+
         out = torch.cat(priors, dim=1)
-        return self.conv_out(out)
+        return self.project(out)
 
 
-class ReducedGlobalAttention(nn.Module):
-    """Compact Global Attention Block with Multi-Scale Context Encoding.
+# -----------------------------------------------------------------------------
+# Global Attention (Non-local + PSP)
+# -----------------------------------------------------------------------------
 
-    Applies non-local style attention using pyramid pooling.
+
+class GlobalContextAttention(nn.Module):
+    """
+    Reduced Non-Local Attention with PSP-enhanced key/value encoding.
     """
 
     def __init__(
@@ -60,183 +90,140 @@ class ReducedGlobalAttention(nn.Module):
         value_channels,
         out_channels=None,
         scale=1,
-        psp_size=(1, 3, 6, 8),
+        psp_sizes=(1, 3, 6, 8),
     ):
-        super(ReducedGlobalAttention, self).__init__()
+        super().__init__()
+
         self.scale = scale
-        self.in_channels = in_channels
         self.out_channels = out_channels or in_channels
-        self.key_channels = key_channels
-        self.value_channels = value_channels
 
-        # Downsample input if needed
-        self.pool = nn.MaxPool2d(kernel_size=(scale, scale)) if scale > 1 else None
-
-        # Key/Query transform (shared weights OK per paper)
-        self.f_key = nn.Sequential(
-            nn.Conv2d(in_channels, key_channels, kernel_size=1, bias=False),
-            nn.BatchNorm2d(key_channels),
-            nn.ReLU(inplace=True),
+        # Optional spatial reduction
+        self.pool = (
+            nn.MaxPool2d(kernel_size=scale) if scale > 1 else nn.Identity()
         )
-        self.f_query = nn.Sequential(
-            nn.Conv2d(in_channels, key_channels, kernel_size=1, bias=False),
+
+        # Query / Key / Value projections
+        self.to_query = nn.Sequential(
+            nn.Conv2d(in_channels, key_channels, 1, bias=False),
             nn.BatchNorm2d(key_channels),
             nn.ReLU(inplace=True),
         )
 
-        # Value transform
-        self.f_value = nn.Conv2d(in_channels, value_channels, kernel_size=1, bias=False)
+        self.to_key = nn.Sequential(
+            nn.Conv2d(in_channels, key_channels, 1, bias=False),
+            nn.BatchNorm2d(key_channels),
+            nn.ReLU(inplace=True),
+        )
 
-        # Final projection
-        self.W = nn.Conv2d(value_channels, self.out_channels, kernel_size=1, bias=False)
+        self.to_value = nn.Conv2d(in_channels, value_channels, 1, bias=False)
 
-        # PSP for global context on keys/values
-        self.psp = PSPModule(sizes=psp_size, in_channels=value_channels)
+        # Independent PSP encoders
+        self.psp_key = PSPModule(key_channels, psp_sizes)
+        self.psp_value = PSPModule(value_channels, psp_sizes)
 
-        # Initialize projection to 0 to preserve identity initially
-        nn.init.constant_(self.W.weight, 0)
-        if self.W.bias is not None:
-            nn.init.constant_(self.W.bias, 0)
+        # Output projection (zero-init for stability)
+        self.project_out = nn.Conv2d(
+            value_channels, self.out_channels, kernel_size=1, bias=False
+        )
+        nn.init.constant_(self.project_out.weight, 0)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass through global attention module.
+    def forward(self, x):
+        B, _, H, W = x.shape
+        x_down = self.pool(x)
+        _, _, Hd, Wd = x_down.shape
 
-        Args:
-            x: Input feature tensor
+        # Query: (B, HW, K)
+        query = self.to_query(x_down)
+        query = query.view(B, -1, Hd * Wd).transpose(1, 2)
 
-        Returns:
-            Context-enhanced features
-        """
-        batch_size, c, h, w = x.shape
+        # Key: (B, K, Hd*Wd)
+        key = self.psp_key(self.to_key(x_down))
+        key = key.view(B, -1, Hd * Wd)
 
-        # Optional downsampling
-        if self.pool is not None:
-            x_down = self.pool(x)
-        else:
-            x_down = x
+        # Value: (B, Hd*Wd, V)
+        value = self.psp_value(self.to_value(x_down))
+        value = value.view(B, -1, Hd * Wd).transpose(1, 2)
 
-        n_d, c_d, h_d, w_d = x_down.shape
+        # Attention
+        attn = torch.bmm(query, key)
+        attn = attn * (key.shape[1] ** -0.5)
+        attn = F.softmax(attn, dim=-1)
 
-        # Query: (B, K, H*W)
-        query = self.f_query(x_down).view(n_d, self.key_channels, -1)
-        query = query.permute(0, 2, 1).contiguous()  # (B, H*W, K)
+        context = torch.bmm(attn, value)
+        context = context.transpose(1, 2).view(B, -1, Hd, Wd)
+        context = self.project_out(context)
 
-        # Key: (B, K, S₁*S₁ + S₂*S₂ + ...) via PSP
-        key = self.f_key(x_down)
-        key_psp = self.psp(key)  # (B, K, H_d, W_d)
-        key = key_psp.view(n_d, self.key_channels, -1)  # (B, K, H_d*W_d)
-
-        # Value: (B, V, H_d, W_d) → (B, V, H_d*W_d)
-        value = self.f_value(x_down)
-        value = self.psp(value)  # Apply PSP to enhance context
-        value = value.view(n_d, self.value_channels, -1)  # (B, V, H_d*W_d)
-        value = value.permute(0, 2, 1).contiguous()  # (B, H_d*W_d, V)
-
-        # Attention map: (B, H*W, H_d*W_d)
-        sim_map = torch.bmm(query, key)  # (B, H*W, H_d*W_d)
-        sim_map = (self.key_channels**-0.5) * sim_map
-        sim_map = F.softmax(sim_map, dim=-1)  # Attend over downsampled space
-
-        # Output: (B, H*W, V)
-        context = torch.bmm(sim_map, value)
-        context = context.permute(0, 2, 1).contiguous()  # (B, V, H*W)
-        context = context.view(n_d, self.value_channels, h, w)  # (B, V, H, W)
-
-        # Project back to input dimension
-        context = self.W(context)
-
-        # Upsample if downsampled
         if self.scale > 1:
             context = F.interpolate(
-                context, size=(h, w), mode="bilinear", align_corners=False
+                context, size=(H, W), mode="bilinear", align_corners=False
             )
 
         return context
 
 
+# -----------------------------------------------------------------------------
+# Local Attention
+# -----------------------------------------------------------------------------
+
+
 class LocalAttention(nn.Module):
-    """Local Channel-Spatial Refinement Block.
+    """Local spatial-channel refinement."""
 
-    Enhances features using depthwise convs and sigmoid gating.
-    """
-
-    def __init__(self, inplane: int) -> None:
-        super(LocalAttention, self).__init__()
-        self.dwconv = nn.Sequential(
-            DepthwiseConv(inplane, inplane, stride=1),  # Keep spatial size
-            DepthwiseConv(inplane, inplane, stride=1),
-            DepthwiseConv(inplane, inplane, stride=1),
+    def __init__(self, channels):
+        super().__init__()
+        self.refine = nn.Sequential(
+            DWConv(channels),
+            DWConv(channels),
+            DWConv(channels),
         )
-        self.sigmoid = nn.Sigmoid()
+        self.gate = nn.Sigmoid()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass through local attention module.
+    def forward(self, x):
+        mask = self.gate(self.refine(x))
+        return x + x * mask
 
-        Args:
-            x: Input feature tensor
 
-        Returns:
-            Refined features with residual connection
-        """
-        residual = x
-        mask = self.dwconv(x)
-        mask = self.sigmoid(mask)
-        out = x * mask
-        return out + residual  # Add modulated features back
+# -----------------------------------------------------------------------------
+# Context Aggregation Block (CAB)
+# -----------------------------------------------------------------------------
 
 
 class ContextAggregationBlock(nn.Module):
-    """Combines Global and Local Attention.
-
-    Global branch captures long-range dependencies. Local branch refines boundaries and
-    fine details.
+    """
+    Final CAB module combining:
+    - Global long-range reasoning
+    - Local boundary refinement
     """
 
-    def __init__(self, inplane, plane):
-        super(ContextAggregationBlock, self).__init__()
-        self.global_attn = ReducedGlobalAttention(
-            in_channels=inplane,
-            key_channels=inplane // 2,
-            value_channels=plane,
-            out_channels=inplane,
+    def __init__(self, in_channels, value_channels):
+        super().__init__()
+
+        self.global_attn = GlobalContextAttention(
+            in_channels=in_channels,
+            key_channels=in_channels // 2,
+            value_channels=value_channels,
+            out_channels=in_channels,
             scale=1,
-            psp_size=(1, 3, 6, 8),
         )
-        self.local_attn = LocalAttention(inplane)
-        self.gamma = nn.Parameter(torch.zeros(1))  # Learnable weight for global path
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass through context aggregation block.
+        self.local_attn = LocalAttention(in_channels)
+        self.gamma = nn.Parameter(torch.zeros(1))
 
-        Args:
-            x: Input feature tensor
-
-        Returns:
-            Aggregated features combining global and local context
-        """
-        # Global context path
-        global_feat = self.global_attn(x)
-        global_feat = global_feat * self.gamma
-
-        # Local refinement path
+    def forward(self, x):
+        global_feat = self.gamma * self.global_attn(x)
         local_feat = self.local_attn(x)
-
-        # Combine
         return global_feat + local_feat
 
 
+# -----------------------------------------------------------------------------
+# Sanity check
+# -----------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
-    # Test full CAB
-    model = ContextAggregationBlock(512, 128)  # inplane=512, plane=128
-    model.eval()
-    model.cuda()
-
+    model = ContextAggregationBlock(512, 128).cuda().eval()
+    x = torch.randn(2, 512, 32, 64).cuda()
     with torch.no_grad():
-        inp = torch.randn(2, 512, 32, 64).cuda()
-        out = model(inp)
-
-    print(f"Input: {inp.shape} → Output: {out.shape}")
-    assert out.shape == inp.shape, "Output shape must match input"
-    print("ContextAggregationBlock test passed!")
+        y = model(x)
+    print("OK", x.shape, "→", y.shape)
+    assert x.shape == y.shape

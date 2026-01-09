@@ -119,7 +119,7 @@ repos:
 
   # Check for TODO/FIXME comments (warning only)
   - repo: https://github.com/pre-commit/mirrors-pylint
-    rev: v3.3.1
+    rev: v2.7.4
     hooks:
       - id: pylint
         args: [
