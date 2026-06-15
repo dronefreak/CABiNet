@@ -121,17 +121,43 @@ class TestCABiNetModel:
         assert model_small.attention_planes == MODEL_CONFIG["small"]["attention_planes"]
 
     def test_cabinet_get_params(self, mock_small_model):
-        """Test get_params returns proper parameter groups."""
-        model = mock_small_model(num_classes=19, mode="large")
-        wd_params, nowd_params = model.get_params()
+        """Test get_params returns all 4 parameter groups including decoder."""
+        model = mock_small_model(num_classes=19, mode="small")
+        result = model.get_params()
 
-        # Should have parameters in both groups
-        assert len(wd_params) > 0
-        assert len(nowd_params) > 0
+        assert (
+            len(result) == 4
+        ), "get_params() must return 4 groups: wd, nowd, lr_mul_wd, lr_mul_nowd"
+        wd_params, nowd_params, lr_mul_wd, lr_mul_nowd = result
 
-        # Parameters should be torch.nn.Parameter
-        assert all(isinstance(p, torch.nn.Parameter) for p in wd_params)
-        assert all(isinstance(p, torch.nn.Parameter) for p in nowd_params)
+        # All groups must be non-empty
+        assert len(wd_params) > 0, "wd_params (backbone/sb weights) must be non-empty"
+        assert (
+            len(nowd_params) > 0
+        ), "nowd_params (backbone/sb biases/BN) must be non-empty"
+        assert len(lr_mul_wd) > 0, "lr_mul_wd (decoder weights) must be non-empty"
+        assert len(lr_mul_nowd) > 0, "lr_mul_nowd (decoder biases/BN) must be non-empty"
+
+        # Decoder params must include the attention branch, FFM, and output conv
+        all_decoder_params = set(id(p) for p in lr_mul_wd + lr_mul_nowd)
+        for name, child in model.named_children():
+            if name in ("ab", "ffm", "conv_out"):
+                for p in child.parameters():
+                    assert (
+                        id(p) in all_decoder_params
+                    ), f"Parameter from decoder module '{name}' missing from lr_mul groups"
+
+    def test_cabinet_get_params_no_overlap(self, mock_small_model):
+        """Test that no parameter appears in both backbone and decoder groups."""
+        model = mock_small_model(num_classes=19, mode="small")
+        wd_params, nowd_params, lr_mul_wd, lr_mul_nowd = model.get_params()
+
+        backbone_ids = set(id(p) for p in wd_params + nowd_params)
+        decoder_ids = set(id(p) for p in lr_mul_wd + lr_mul_nowd)
+        overlap = backbone_ids & decoder_ids
+        assert (
+            len(overlap) == 0
+        ), f"{len(overlap)} parameters appear in both backbone and decoder groups"
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_cabinet_cuda(self, num_classes, mock_large_model):

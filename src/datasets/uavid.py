@@ -55,8 +55,10 @@ class UAVid(Dataset):
         self.rootpth = rootpth
         self.cropsize = tuple(cropsize)
 
-        assert self.mode in ("train", "val"), f"Mode {mode} not supported."
-        assert osp.exists(rootpth), f"Dataset path {rootpth} does not exist!"
+        if self.mode not in ("train", "val"):
+            raise ValueError(f"Mode '{mode}' not supported. Choose 'train' or 'val'.")
+        if not osp.exists(rootpth):
+            raise FileNotFoundError(f"Dataset path does not exist: {rootpth}")
 
         # We don't actually use config_file for
         # anything because labels are already trainIds
@@ -124,7 +126,7 @@ class UAVid(Dataset):
                 [
                     # Geometric
                     RandomHorizontalFlip(p=0.2),
-                    RandomRotate(degrees=(-10, 10)),
+                    RandomRotate(degrees=(-10, 10), ignore_label=self.ignore_lb),
                     RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
                     RandomCrop(
                         size=self.cropsize,
@@ -240,9 +242,10 @@ if __name__ == "__main__":
     uni = []
     from tqdm import tqdm
 
-    for img, lb in tqdm(ds, desc="Validating labels"):
-        lb_np = lb.numpy()
-        unique_labels = np.unique(lb_np[lb_np != ds.ignore_lb])  # Exclude ignore
-        uni.extend(unique_labels.tolist())
+    for item in tqdm(ds, desc="Validating labels"):
+        for lb in item["label_patches"]:
+            lb_np = lb.numpy()
+            unique_labels = np.unique(lb_np[lb_np != ds.ignore_lb])  # Exclude ignore
+            uni.extend(unique_labels.tolist())
 
     print("Unique training IDs found:", sorted(set(uni)))

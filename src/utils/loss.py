@@ -95,9 +95,9 @@ class SoftmaxFocalLoss(nn.Module):
             # Convert to tensor if passed as list
             if not isinstance(weight, torch.Tensor):
                 weight = torch.tensor(weight, dtype=torch.float32)
-        self.register_buffer("weight", weight)  # keeps weights on the same device
-
-        self.nll = nn.NLLLoss(weight=self.weight, ignore_index=self.ignore_lb)
+        self.register_buffer(
+            "weight", weight
+        )  # keeps weights on the same device as model
 
     def forward(self, logits, labels):
         # Softmax probabilities
@@ -108,8 +108,13 @@ class SoftmaxFocalLoss(nn.Module):
         weight = (1 - prob) ** self.gamma
         focal_log_prob = weight * log_prob
 
-        # Negative log-likelihood with class weights
-        loss = self.nll(focal_log_prob, labels)
+        # Narrow type: register_buffer may be typed as Tensor|Module; cast for mypy
+        cls_weight: "torch.Tensor | None" = (
+            self.weight if isinstance(self.weight, torch.Tensor) else None
+        )
+        loss = F.nll_loss(
+            focal_log_prob, labels, weight=cls_weight, ignore_index=self.ignore_lb
+        )
         return loss
 
 

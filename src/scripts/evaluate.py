@@ -3,7 +3,7 @@
 
 import logging
 import math
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -32,7 +32,7 @@ class MscEvalV0(object):
         dataloader: DataLoader,
         n_classes: int,
         ignore_label: int = 255,
-        scales: Tuple[float] = (1.0,),
+        scales: Sequence[float] = (1.0,),
         flip: bool = False,
         cropsize: int = 1024,
         device: torch.device = None,
@@ -103,12 +103,14 @@ class MscEvalV0(object):
             full_H, full_W = H, W
             indices = None
 
-        # Prepare output buffer
+        # Prepare output buffer and overlap count map
         prob = torch.zeros((N, self.n_classes, full_H, full_W), device=image.device)
+        count = torch.zeros((1, 1, full_H, full_W), device=image.device)
 
         if full_H < cropsize or full_W < cropsize:
             chip = image
             prob += self.eval_chip(chip)
+            count += 1
         else:
             stride = int(cropsize * stride_rate)
             n_x = math.ceil((full_W - cropsize) / stride) + 1
@@ -124,6 +126,10 @@ class MscEvalV0(object):
                     chip = image[:, :, y_start:y_end, x_start:x_end]
                     chip_prob = self.eval_chip(chip)
                     prob[:, :, y_start:y_end, x_start:x_end] += chip_prob
+                    count[:, :, y_start:y_end, x_start:x_end] += 1
+
+        # Normalize by overlap count so all pixels are weighted equally
+        prob = prob / count.clamp(min=1)
 
         # Remove padding if applied
         if indices is not None:
@@ -182,7 +188,7 @@ class MscEvalV0(object):
         hist = np.zeros((self.n_classes, self.n_classes), dtype=np.float64)
 
         # Use rank 0 for progress bar
-        is_dist = dist.is_initialized()
+        is_dist = dist is not None and dist.is_initialized()
         rank = dist.get_rank() if is_dist else 0
         # world_size = dist.get_world_size() if is_dist else 1
 

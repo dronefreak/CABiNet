@@ -205,7 +205,9 @@ class MobileNetV3(torch.nn.Module):
     def _initialize_weights(self):
         if self.weights is not None and Path(self.weights).is_file():
             try:
-                state_dict = torch.load(self.weights, map_location="cpu")
+                state_dict = torch.load(
+                    self.weights, map_location="cpu", weights_only=True
+                )
                 self_state_dict = self.state_dict()
                 for k, v in state_dict.items():
                     if "classifier" in k:

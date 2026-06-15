@@ -91,7 +91,8 @@ def infer_image(
 
     img_tensor = img_tensor.to(device)
     B, C, H, W = img_tensor.shape
-    assert B == 1, "Only supports one image at a time"
+    if B != 1:
+        raise ValueError(f"infer_image only supports batch size 1, got {B}")
 
     probs = torch.zeros((1, num_classes, H, W), device=device)
 
@@ -160,11 +161,13 @@ def visualize_predictions(
             lb = None
             has_gt = False
 
-        # Extract first image in batch (since batch_size=1, it's safe)
+        # Extract first image in batch and apply inverse ImageNet normalization
         img_np = img[0].permute(1, 2, 0).cpu().numpy()  # (C, H, W) -> (H, W, C)
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        img_np = (img_np * std + mean).clip(0.0, 1.0)
         img_np = (img_np * 255).astype(np.uint8)
         img_pil = Image.fromarray(img_np)
-        # orig_size = img_pil.size  # (W, H)
 
         # Predict
         pred = infer_image(model, img, scales=[1.0], flip=False, device=device)
@@ -205,7 +208,7 @@ def main(cfg: DictConfig) -> None:
         Path(cfg.training_config.experiments_path) / cfg.training_config.model_save_name
     )
     console.print(f"[INFO] Loading checkpoint: {ckpt_path}")
-    state_dict = torch.load(ckpt_path, map_location="cpu")
+    state_dict = torch.load(ckpt_path, map_location="cpu", weights_only=True)
     model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
