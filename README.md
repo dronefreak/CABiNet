@@ -1,116 +1,351 @@
-# CABiNet
+# CABiNet: Efficient Context Aggregation Network for Semantic Segmentation
 
-With the increasing demand of autonomous systems, pixelwise semantic segmentation for visual scene understanding needs to be not only accurate but also efficient for potential real-time applications. In this paper, we propose Context Aggregation Network, a dual branch convolutional neural network, with significantly lower computational costs as compared to the state-of-the-art, while maintaining a competitive prediction accuracy. Building upon the existing dual branch architectures for high-speed semantic segmentation, we design a high resolution branch for effective spatial detailing and a context branch with light-weight versions of global aggregation and local distribution blocks, potent to capture both long-range and local contextual dependencies required for accurate semantic segmentation, with low computational overheads. We evaluate our method on two semantic segmentation datasets, namely Cityscapes dataset and UAVid dataset. For Cityscapes test set, our model achieves state-of-the-art results with mIOU of **75.9%, at 76 FPS on an NVIDIA RTX 2080Ti and 8 FPS on a Jetson Xavier NX**. With regards to UAVid dataset, our proposed network achieves mIOU score of **63.5% with high execution speed (15 FPS)**.
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 
-An overall model architecture of Context Aggregation Network is shown in the figure below. The spatial and context branches allow for multi-scale feature extraction with significantly low computations. Fusion block (FFM) assists in feature normalization and selection for optimal scene segmentation. The bottleneck in the context branch allows for a deep supervision into the representational learning of the attention blocks.
+CABiNet (Context Aggregation Network) is a dual-branch convolutional neural network designed for real-time semantic segmentation with significantly lower computational costs compared to state-of-the-art methods while maintaining competitive accuracy. The architecture is specifically optimized for autonomous systems and real-time applications.
 
-![title](imgs/cabinet.jpg)
+## Key Features
 
-## Results on Cityscapes
+- **High Performance**: Achieves 75.9% mIoU on Cityscapes test set at 76 FPS (NVIDIA RTX 2080Ti)
+- **Edge Deployment**: 8 FPS on Jetson Xavier NX for embedded applications
+- **Dual-Branch Architecture**: Combines high-resolution spatial detailing with efficient context aggregation
+- **Lightweight Design**: Reduced computational overhead through optimized global and local context blocks
+- **Multi-Scale Support**: Effective feature extraction across different scales
 
-Semantic segmentation results on the Cityscapes validation set are shown below. First row consists of the input RGB images; the second row shows the prediction results of SwiftNet (Orsic et al., 2019); the third row shows the predictions from our model and the red boxes show the regions of improvements, and the last row comprises of the ground truth of the input images.
+## Performance
 
-![title](imgs/citys.jpg)
+| Dataset | mIoU | FPS (RTX 2080Ti) | FPS (Jetson Xavier NX) |
+|---------|------|------------------|------------------------|
+| Cityscapes | 75.9% | 76 | 8 |
+| UAVid | 63.5% | 15 | - |
 
-## Results on UAVid
+## Architecture
 
-Semantic segmentation results on the UAVid (Lyu et al., 2020) validation set shown below. First column consists of the input RGB images. Second column contains the predictions from our SOTA (Lyu et al., 2020) and the third column contains the predictions from our model. White boxes highlight the regions of improvement over the state-of-the-art (Lyu et al., 2020).
+The CABiNet architecture employs a dual-branch design that balances spatial detail preservation and contextual understanding:
 
-![title](imgs/uavid_r.jpg)
+- **Spatial Branch**: Maintains high-resolution features for precise boundary detection
+- **Context Branch**: Lightweight global aggregation and local distribution blocks for capturing long-range and local dependencies
+- **Feature Fusion Module (FFM)**: Normalizes and selects optimal features for scene segmentation
+- **Deep Supervision**: Bottleneck in context branch enables better representational learning
 
-## Setup Requirements
+![CABiNet Architecture](imgs/cabinet.jpg)
 
-A conda environment file has been provided in this repo, called `cabinet_environment.yml`. So all you need to setup the repo is to run `conda env create -f cabinet_environment.yml` and everything should be okay. This implementation works with PyTorch>1.0.0 (could work with lower versions, but I have not tested them). A more systematic method of setting up the project is given below:
+## Results
+
+### Cityscapes Dataset
+
+Comparison of semantic segmentation results on the Cityscapes validation set:
+
+![Cityscapes Results](imgs/citys.jpg)
+
+*From top to bottom: Input RGB images, SwiftNet predictions, CABiNet predictions (red boxes highlight improvements), ground truth*
+
+### UAVid Dataset
+
+Performance on the UAVid validation set for aerial imagery:
+
+![UAVid Results](imgs/uavid_r.jpg)
+
+*Columns: Input images, State-of-the-art predictions, CABiNet predictions (white boxes show improvements)*
+
+## Installation
+
+### Prerequisites
+
+- Python 3.8 or higher
+- CUDA-capable GPU (recommended)
+- Conda or pip for package management
+
+### Quick Setup
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/dronefreak/CABiNet.git
+   cd CABiNet
+   ```
+
+2. **Create and activate environment**:
+   ```bash
+   # Using conda with provided environment file
+   conda env create -f environment.yml
+   conda activate cabinet
+
+   # Or install in local environment
+   mkdir env/
+   conda env create -f environment.yml --prefix env/cabinet
+   conda activate env/cabinet
+   ```
+
+3. **Install package**:
+   ```bash
+   pip install -e .
+   ```
+
+### Alternative Setup with pip
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+pip install -e .
+```
+
+## Project Structure
 
 ```
-mkdir env/
-conda env create -f cabinet_environment.yml --prefix env/cabinet_environment
-conda activate env/cabinet_environment
-pip3 install -e .
+CABiNet/
+├── src/
+│   ├── models/              # Neural network architectures
+│   │   ├── cabinet.py       # Main CABiNet model implementation
+│   │   ├── cab.py           # Context Aggregation Block (plug-and-play module)
+│   │   ├── mobilenetv3.py   # MobileNetV3 backbone implementations
+│   │   ├── layers/          # Shared layer components
+│   │   └── constants.py     # Model configuration constants
+│   ├── datasets/            # Data loading and preprocessing
+│   │   ├── cityscapes.py    # Cityscapes dataset loader
+│   │   ├── uavid.py         # UAVid dataset loader
+│   │   └── transform.py     # Data augmentation pipeline
+│   ├── scripts/             # Training and evaluation scripts
+│   │   ├── train.py         # Model training
+│   │   ├── evaluate.py      # Model evaluation (single/multi-scale)
+│   │   └── visualize.py     # Visualization and demo
+│   └── utils/               # Utility functions
+│       ├── loss.py          # Loss functions (OHEM, Focal Loss)
+│       ├── optimizer.py     # Custom optimizer with warmup
+│       ├── logger.py        # Logging utilities
+│       ├── profiler.py      # Performance profiling tools
+│       └── exceptions.py    # Custom exception classes
+├── configs/                 # Configuration files
+│   ├── train.yaml           # Training configuration (Hydra)
+│   ├── dataset/             # Dataset-specific configs
+│   │   ├── cityscapes.yaml
+│   │   └── uavid.yaml
+│   ├── model/               # Model-specific configs
+│   │   ├── mobilenetv3_large.yaml
+│   │   └── mobilenetv3_small.yaml
+│   ├── cityscapes_info.json # Cityscapes label information
+│   └── UAVid_info.json      # UAVid label information
+├── tests/                   # Test suite
+│   ├── unit/                # Unit tests
+│   ├── integration/         # Integration tests
+│   └── conftest.py          # Shared test fixtures
+├── legacy/                  # Legacy configuration files
+└── .github/                 # GitHub workflows and documentation
+    └── workflows/           # CI/CD pipelines
 ```
 
-In the above process we basically use the prefix for this conda environment so that it is local to this repo. Also, since this project is packaged, its advisabele to install it in editable mode via `pip3 install -e .` inside the conda environment.
+### Key Files and Directories
 
-## File Description
+#### Models ([`src/models/`](src/models/))
 
-A quick overview of the different files and packages inside this project.
+- **[`cabinet.py`](src/models/cabinet.py)**: Complete implementation of the CABiNet architecture including spatial branch, context branch, and feature fusion modules
+- **[`cab.py`](src/models/cab.py)**: Context Aggregation Block - a modular component that can be integrated into other PyTorch models
+- **[`mobilenetv3.py`](src/models/mobilenetv3.py)**: MobileNetV3-Large and MobileNetV3-Small backbone implementations with pretrained weight loading
+- **[`layers/common.py`](src/models/layers/common.py)**: Reusable layer components (DepthwiseConv, DepthwiseSeparableConv)
 
-### Core
+#### Datasets ([`src/datasets/`](src/datasets/))
 
-Contains model implementations under `models/`, dataloaders under `datasets/` and general project `utils/`.
+- **[`cityscapes.py`](src/datasets/cityscapes.py)**: Cityscapes dataset loader with label remapping and thread-safe preprocessing
+- **[`uavid.py`](src/datasets/uavid.py)**: UAVid dataset loader with patch-based processing for large aerial images
+- **[`transform.py`](src/datasets/transform.py)**: Comprehensive data augmentation including geometric, photometric, and regularization transforms
 
-- `models/cab.py` - Contains the implementation of context aggregation block, which is a plug-n-play module, can be added to any PyTorch based network.
-- `models/cabinet.py` - Contains the implementation of the proposed CABiNet model.
-- `models/mobilenetv3.py` - Contains the implementation of the MobileNetV3 backbones (both Large and Small), the pretrained weights for these backbones can be found under `pretrained/` folder of the repo.
-- `datasets/cityscapes.py` - CityScapes dataloader which requires `cityscapes_info.json` (contains a general description of valid/invalid classes etc.)
-- `datasets/uavid.py` - UAVid dataloader which requires `UAVid_info.json` (contains a general description of valid/invalid classes etc.)
-- `datasets/transform.py` - Contains data augmentation techniques.
-- `utils/loss.py` - Contains the loss functions for training models.
-- `utils/optimizer.py` - Contains the optimizers for training models.
+#### Scripts ([`src/scripts/`](src/scripts/))
 
-### Scripts
+- **[`train.py`](src/scripts/train.py)**: Main training script with Hydra configuration, mixed precision training, and evaluation
+- **[`evaluate.py`](src/scripts/evaluate.py)**: Multi-scale evaluation with sliding window inference
+- **[`visualize.py`](src/scripts/visualize.py)**: Visualization script for generating prediction overlays
 
-Contains training, validation and demo scripts model analysis.
+#### Utilities ([`src/utils/`](src/utils/))
 
-- `scripts/train.py` - Training code for CABiNet on CityScapes (a similar one can be used for training the model on UAVid, just by changing the imported libraries and path of the datasets).
-- `scripts/evaluate.py` - Evaluation code for trained models, can be used in both multi-scale and single-scale mode.
-- `scripts/demo.py` - A small demo code for running trained models on custom images.
+- **[`loss.py`](src/utils/loss.py)**: OHEM Cross Entropy and Focal Loss implementations
+- **[`optimizer.py`](src/utils/optimizer.py)**: Custom optimizer with polynomial learning rate decay and warmup
+- **[`profiler.py`](src/utils/profiler.py)**: Performance profiling for inference time, memory usage, and FLOPs analysis
 
-### Configs
+#### Configuration ([`configs/`](configs/))
 
-- `configs/train_citys.json` - Training and validation config file for CABiNet model on CityScapes dataset. Please use this file to manage input/output directories, dataset paths and other training parameters.
-- `configs/train_uavid.json` - Training and validation config file for CABiNet model on UAVid dataset. Please use this file to manage input/output directories, dataset paths and other training parameters.
-- `configs/cityscapes_info.json` - Valid/invalid label information about CityScapes dataset.
-- `configs/UAVid_info.json` - Valid/invalid label information about UAVid dataset.
+- **[`train.yaml`](configs/train.yaml)**: Main training configuration with hyperparameters and paths
+- **`dataset/*.yaml`**: Dataset-specific configurations (paths, preprocessing parameters)
+- **`model/*.yaml`**: Model architecture configurations (backbone selection, feature dimensions)
 
-## Training/Evaluation on CityScapes and UAVid
+## Usage
 
-Well the pipeline should be pretty easy, you need to download the CityScapes dataset from [here](https://www.cityscapes-dataset.com/downloads/). Look for `gtFine_trainvaltest.zip (241MB)` for the GT and
-`leftImg8bit_trainvaltest.zip (11GB)` for the input corresponding RGB images. For UAVid you can download the dataset from [here](https://uavid.nl/), under `Downloads`. Once the datasets are downloaded, extract the .zip files and specify the dataset paths in the appropriate config files under `configs/`
+### Training
 
-Then simply run the following commands:
+#### Cityscapes Dataset
 
+1. **Download the dataset** from [Cityscapes website](https://www.cityscapes-dataset.com/downloads/):
+   - `gtFine_trainvaltest.zip` (241MB) - Ground truth labels
+   - `leftImg8bit_trainvaltest.zip` (11GB) - RGB images
+
+2. **Extract and configure**:
+   ```bash
+   # Extract datasets
+   unzip gtFine_trainvaltest.zip -d data/cityscapes/
+   unzip leftImg8bit_trainvaltest.zip -d data/cityscapes/
+
+   # Update dataset path in configs/dataset/cityscapes.yaml
+   ```
+
+3. **Start training**:
+   ```bash
+   export CUDA_VISIBLE_DEVICES=0
+   python src/scripts/train.py
+   ```
+
+#### UAVid Dataset
+
+1. **Download** from [UAVid website](https://uavid.nl/) under Downloads section
+
+2. **Configure and train**:
+   ```bash
+   # Update dataset path in configs/dataset/uavid.yaml
+   python src/scripts/train.py dataset=uavid
+   ```
+
+### Evaluation
+
+Evaluate a trained model on the validation set:
+
+```bash
+# Single-scale evaluation
+python src/scripts/evaluate.py --model-path experiments/model_best.pth
+
+# Multi-scale evaluation (better accuracy, slower)
+python src/scripts/evaluate.py --model-path experiments/model_best.pth --multi-scale
 ```
-export CUDA_VISIBLE_DEVICES=0, # or 1, 2 or 3 (depending upon which device you want to use in case there are multiple.)
-python3 scripts/train.py --config configs/train_citys.json
+
+### Visualization
+
+Generate prediction visualizations:
+
+```bash
+python src/scripts/visualize.py
 ```
 
-The train script executes and trains the model, and saves the model weights 10 times during the training, depending upon the best mIOU score obtained on the validation set during training.
+### Performance Profiling
 
-**Pre-trained CABiNet models coming soon !!!**
+Benchmark model performance:
 
-## Issues and Pull Requests
+```python
+from src.utils.profiler import PerformanceProfiler
+from src.models.cabinet import CABiNet
 
-Please feel free to create PRs and/or send me issues directly to `kumaar324@gmail.com`. I will be happy to help, but I might not be available a lot of times, still I will try my best.
+model = CABiNet(n_classes=19, mode="large")
+profiler = PerformanceProfiler(model)
 
-# Citation
+# Run comprehensive benchmark
+results = profiler.run_full_benchmark(
+    input_size=(1, 3, 512, 512),
+    num_iterations=100
+)
 
-If you find this work helpful, please consider citing the following articles:
-
+print(f"Average FPS: {results['timing']['fps']:.2f}")
+print(f"Peak Memory: {results['memory']['peak_mb']:.2f} MB")
 ```
+
+## Pretrained Models
+
+Pretrained weights for MobileNetV3 backbones are available in the [`src/models/pretrained_backbones/`](src/models/pretrained_backbones/) directory.
+
+**Note**: Full CABiNet pretrained models on Cityscapes and UAVid will be available soon.
+
+## Testing
+
+Run the test suite to verify installation:
+
+```bash
+# Run all tests
+pytest tests/
+
+# Run with coverage report
+pytest tests/ --cov=src --cov-report=html
+
+# Run specific test category
+pytest tests/unit/          # Unit tests only
+pytest tests/integration/   # Integration tests only
+```
+
+See [`tests/README.md`](tests/README.md) for detailed testing documentation.
+
+## Development
+
+### Code Quality
+
+The project uses several tools to maintain code quality:
+
+- **Black**: Code formatting
+- **isort**: Import sorting
+- **flake8**: Linting
+- **mypy**: Type checking
+- **pytest**: Testing framework
+
+### Pre-commit Hooks
+
+Install pre-commit hooks to automatically check code quality:
+
+```bash
+pip install pre-commit
+pre-commit install
+
+# Run manually on all files
+pre-commit run --all-files
+```
+
+### Contributing
+
+Contributions are welcome! Please see [`CONTRIBUTING.md`](CONTRIBUTING.md) for guidelines on:
+
+- Setting up the development environment
+- Code style and conventions
+- Testing requirements
+- Pull request process
+
+## Citation
+
+If you find this work helpful, please consider citing our papers:
+
+**ICRA 2021**:
+```bibtex
 @INPROCEEDINGS{9560977,
   author={Kumaar, Saumya and Lyu, Ye and Nex, Francesco and Yang, Michael Ying},
   booktitle={2021 IEEE International Conference on Robotics and Automation (ICRA)},
   title={CABiNet: Efficient Context Aggregation Network for Low-Latency Semantic Segmentation},
   year={2021},
   pages={13517-13524},
-  doi={10.1109/ICRA48506.2021.9560977}}
-
-```
-
-and
-
-```
-@article{YANG2021124,
-title = {Real-time Semantic Segmentation with Context Aggregation Network},
-journal = {ISPRS Journal of Photogrammetry and Remote Sensing},
-volume = {178},
-pages = {124-134},
-year = {2021},
-issn = {0924-2716},
-doi = {https://doi.org/10.1016/j.isprsjprs.2021.06.006},
-url = {https://www.sciencedirect.com/science/article/pii/S0924271621001647},
-author = {Michael Ying Yang and Saumya Kumaar and Ye Lyu and Francesco Nex},
-keywords = {Semantic segmentation, Real-time, Convolutional neural network, Context aggregation network}
+  doi={10.1109/ICRA48506.2021.9560977}
 }
 ```
+
+**ISPRS Journal 2021**:
+```bibtex
+@article{YANG2021124,
+  title = {Real-time Semantic Segmentation with Context Aggregation Network},
+  journal = {ISPRS Journal of Photogrammetry and Remote Sensing},
+  volume = {178},
+  pages = {124-134},
+  year = {2021},
+  issn = {0924-2716},
+  doi = {https://doi.org/10.1016/j.isprsjprs.2021.06.006},
+  url = {https://www.sciencedirect.com/science/article/pii/S0924271621001647},
+  author = {Michael Ying Yang and Saumya Kumaar and Ye Lyu and Francesco Nex},
+  keywords = {Semantic segmentation, Real-time, Convolutional neural network, Context aggregation network}
+}
+```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Contact
+
+For questions, issues, or collaboration opportunities:
+
+- **Email**: kumaar324@gmail.com
+- **Issues**: Please use the [GitHub issue tracker](https://github.com/dronefreak/CABiNet/issues)
+- **Pull Requests**: Contributions are welcome via [pull requests](https://github.com/dronefreak/CABiNet/pulls)
+
+## Acknowledgments
+
+This work was conducted at the University of Twente, Faculty of Geo-Information Science and Earth Observation (ITC).
