@@ -112,7 +112,7 @@ class Optimizer:
     def get_lr(self, group_idx: int, group: Dict[str, Any]) -> float:
         """Compute current LR for a given parameter group."""
         base_lr = self.lr0
-        lr_scale = group.get("lr_scale", 1.0)
+        lr_scale: float = float(group.get("lr_scale", 1.0))
 
         if self.it < self.warmup_steps:
             # Linear or exponential warmup — use linear for stability

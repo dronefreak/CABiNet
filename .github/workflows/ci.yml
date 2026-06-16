@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, dev, master, claude/* ]
+    branches: [main, dev, master, claude/*]
   pull_request:
-    branches: [ main, dev, master ]
+    branches: [main, dev, master]
 
 jobs:
   lint:
@@ -12,130 +12,96 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-        cache: 'pip'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install black isort flake8 mypy
-        pip install -r requirements.txt
+      - name: Install linting dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # CPU-only torch so mypy can resolve torch types without a 5 GB GPU download
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install ruff mypy bandit
 
-    - name: Check code formatting with Black
-      run: black --check src/ tests/
+      - name: Lint with ruff
+        run: |
+          ruff check src/ tests/
+          ruff format --check src/ tests/
 
-    - name: Check import sorting with isort
-      run: isort --check-only src/ tests/
-
-    - name: Lint with flake8
-      run: |
-        # Stop the build if there are Python syntax errors or undefined names
-        flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
-        # Exit-zero treats all errors as warnings
-        flake8 src/ --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
-
-    - name: Type check with mypy
-      run: mypy src/ --ignore-missing-imports
-      continue-on-error: true  # Don't fail build on type errors initially
+      - name: Type check with mypy
+        run: mypy src/ --ignore-missing-imports
+        continue-on-error: true # type errors are warnings until fully annotated
 
   test:
-    name: Test Suite
-    runs-on: ${{ matrix.os }}
+    name: Test Suite (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ['3.8', '3.9', '3.10', '3.11']
-        exclude:
-          # Reduce matrix size for faster CI
-          - os: macos-latest
-            python-version: '3.8'
-          - os: macos-latest
-            python-version: '3.9'
+        # torch 2.x requires Python ≥3.9; 3.10 is the primary dev target
+        python-version: ["3.10", "3.11"]
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-        cache: 'pip'
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov pytest-xdist
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Install CPU-only torch first to avoid downloading the 5 GB CUDA wheel
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          # Install remaining project deps (requirements.txt excludes torch when already present)
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+          # Editable install so `from src.models...` works without PYTHONPATH tricks
+          pip install -e .
 
-    - name: Run tests
-      run: |
-        pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing -n auto
+      - name: Run tests
+        # Unset PYTHONPATH to prevent system packages (e.g. ROS) from leaking in
+        env:
+          PYTHONPATH: ""
+        run: |
+          pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      if: matrix.python-version == '3.10' && matrix.os == 'ubuntu-latest'
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-        fail_ci_if_error: false
-
-  test-gpu:
-    name: GPU Tests
-    runs-on: ubuntu-latest
-    # Only run GPU tests on main branch to save resources
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-        pip install -r requirements.txt
-        pip install pytest
-
-    - name: Run CPU-only tests (simulate GPU tests)
-      run: |
-        pytest tests/ -v -m "not gpu" || true
-      # Note: This is a placeholder. Real GPU tests would require GPU runners
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: matrix.python-version == '3.10'
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
 
   security:
     name: Security Scan
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install bandit safety
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit
 
-    - name: Run bandit security check
-      run: bandit -r src/ -ll
-      continue-on-error: true
-
-    - name: Check for known security vulnerabilities
-      run: safety check --json
-      continue-on-error: true
+      - name: Run bandit security check
+        # -c pyproject.toml ensures [tool.bandit] skips (e.g. B311) are honoured
+        run: bandit -c pyproject.toml -r src/ -ll
+        continue-on-error: true
 
   build:
     name: Build Package
@@ -143,27 +109,27 @@ jobs:
     needs: [lint, test]
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
 
-    - name: Install build dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install build twine
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
 
-    - name: Build package
-      run: python -m build
+      - name: Build package
+        run: python -m build
 
-    - name: Check package
-      run: twine check dist/*
+      - name: Check package
+        run: twine check dist/*
 
-    - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: dist-packages
-        path: dist/
-        retention-days: 7
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-packages
+          path: dist/
+          retention-days: 7

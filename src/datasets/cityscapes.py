@@ -144,7 +144,7 @@ class CityScapes(Dataset):
         img = Image.open(impth).convert("RGB")
         label = Image.open(lbpth)  # Keep as PIL until after transforms
 
-        if self.mode == "train":
+        if self.mode == "train" and self.trans_train is not None:
             im_lb = dict(im=img, lb=label)
             im_lb = self.trans_train(im_lb)
             img, label = im_lb["im"], im_lb["lb"]

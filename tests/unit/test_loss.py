@@ -123,3 +123,32 @@ class TestSoftmaxFocalLoss:
 
         assert logits.grad is not None
         assert not torch.isnan(logits.grad).any()
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_focal_loss_cuda_no_device_mismatch(self):
+        """Test that SoftmaxFocalLoss with class weights works correctly after moving to CUDA.
+
+        Regression test: previously nn.NLLLoss held a CPU weight reference causing a device
+        mismatch error when the model was moved to GPU. Now we use F.nll_loss with the
+        registered buffer (self.weight) which moves with .to(device).
+        """
+        weights = torch.ones(19)
+        loss_fn = SoftmaxFocalLoss(gamma=2.0, weight=weights, ignore_lb=255).cuda()
+
+        logits = torch.randn(2, 19, 32, 32).cuda()
+        labels = torch.randint(0, 19, (2, 32, 32)).cuda()
+
+        # Must not raise RuntimeError: expected scalar type Float but found ...
+        loss = loss_fn(logits, labels)
+        assert not torch.isnan(loss)
+        assert loss.item() >= 0
+
+    def test_focal_loss_no_weight_cuda_compatible(self):
+        """Test SoftmaxFocalLoss without weights runs without device issues."""
+        loss_fn = SoftmaxFocalLoss(gamma=2.0, ignore_lb=255)
+        # weight buffer should be None — no issues expected on any device
+        assert loss_fn.weight is None
+        logits = torch.randn(2, 19, 16, 16)
+        labels = torch.randint(0, 19, (2, 16, 16))
+        loss = loss_fn(logits, labels)
+        assert not torch.isnan(loss)

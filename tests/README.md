@@ -20,11 +20,13 @@ tests/
 ## Running Tests
 
 ### Run All Tests
+
 ```bash
 pytest tests/
 ```
 
 ### Run Specific Test Category
+
 ```bash
 # Unit tests only
 pytest tests/unit/
@@ -40,6 +42,7 @@ pytest tests/unit/test_models.py::TestCABiNetModel::test_cabinet_forward_shape
 ```
 
 ### Run with Coverage
+
 ```bash
 pytest tests/ --cov=src --cov-report=html
 ```
@@ -47,6 +50,7 @@ pytest tests/ --cov=src --cov-report=html
 This generates an HTML coverage report in `htmlcov/index.html`.
 
 ### Run in Parallel
+
 ```bash
 pytest tests/ -n auto
 ```
@@ -54,6 +58,7 @@ pytest tests/ -n auto
 Uses all available CPU cores for faster testing.
 
 ### Run with Verbose Output
+
 ```bash
 pytest tests/ -v
 ```
@@ -69,6 +74,7 @@ Tests can be marked for selective execution:
 ```
 
 Run specific markers:
+
 ```bash
 pytest tests/ -m "not slow"  # Skip slow tests
 pytest tests/ -m gpu        # Run only GPU tests
@@ -114,6 +120,7 @@ def test_multiple_modes(mode, num_classes):
 ## Continuous Integration
 
 Tests are automatically run on:
+
 - Every push to main/develop branches
 - Every pull request
 - Multiple Python versions (3.8, 3.9, 3.10, 3.11)
@@ -142,6 +149,7 @@ results = profiler.run_full_benchmark()
 ## Contributing
 
 When adding new features:
+
 1. Write tests first (TDD)
 2. Ensure tests pass locally
 3. Check coverage: `pytest --cov=src`

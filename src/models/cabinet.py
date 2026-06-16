@@ -12,7 +12,6 @@ import torch.nn.functional as F
 from src.models.cab import ContextAggregationBlock
 from src.models.constants import MODEL_CONFIG
 from src.models.mobilenetv3 import MobileNetV3
-from src.utils.exceptions import ModelLoadError
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +181,7 @@ class CABiNet(nn.Module):
         mode="large",
     ):
         super().__init__()
-        # Load MobileNetV3 backbone
+        # Load MobileNetV3 backbone — weight loading is handled inside MobileNetV3._initialize_weights
         self.mobile = MobileNetV3(
             cfgs=cfgs, mode=mode, num_classes=n_classes, weights=backbone_weights
         )
@@ -193,20 +192,10 @@ class CABiNet(nn.Module):
             raise ValueError(f"Invalid mode: {mode}. Must be 'large' or 'small'")
         self.attention_planes = config["attention_planes"]
 
-        # Only load custom weights if provided
         if backbone_weights is not None:
-            try:
-                state_dict = torch.load(backbone_weights, map_location="cpu")
-                # Filter only backbone keys (e.g., 'features.*')
-                filtered_state_dict = {
-                    k: v for k, v in state_dict.items() if k.startswith("features")
-                }
-                self.mobile.load_state_dict(filtered_state_dict, strict=False)
-                logger.info(f"Loaded backbone weights from {backbone_weights}")
-            except FileNotFoundError as e:
-                raise ModelLoadError(str(backbone_weights), f"File not found: {e}")
-            except (RuntimeError, KeyError) as e:
-                raise ModelLoadError(str(backbone_weights), f"Invalid state dict: {e}")
+            logger.info(
+                f"Backbone weights loaded from {backbone_weights} via MobileNetV3"
+            )
 
         self.ab = AttentionBranch(self.attention_planes, 256, 256, n_classes)
         self.sb = SpatialBranch()
@@ -273,24 +262,42 @@ class CABiNet(nn.Module):
         for name, child in self.named_children():
             if name in ("ffm", "conv_out", "ab"):
                 # Decoder parts: use higher LR
+                captured = set()
                 for m in child.modules():
                     if isinstance(m, nn.Conv2d):
                         lr_mul_wd.append(m.weight)
+                        captured.add(id(m.weight))
                         if m.bias is not None:
                             lr_mul_nowd.append(m.bias)
+                            captured.add(id(m.bias))
                     elif isinstance(m, nn.BatchNorm2d):
-                        lr_mul_nowd.extend(list(m.parameters()))
+                        for p in m.parameters():
+                            lr_mul_nowd.append(p)
+                            captured.add(id(p))
+                # Catch remaining params (e.g. learnable scalars like CAB.gamma)
+                for p in child.parameters():
+                    if id(p) not in captured:
+                        lr_mul_nowd.append(p)
             else:
                 # Backbone & spatial branch
+                captured = set()
                 for m in child.modules():
                     if isinstance(m, nn.Conv2d):
                         wd_params.append(m.weight)
+                        captured.add(id(m.weight))
                         if m.bias is not None:
                             nowd_params.append(m.bias)
+                            captured.add(id(m.bias))
                     elif isinstance(m, nn.BatchNorm2d):
-                        nowd_params.extend(list(m.parameters()))
+                        for p in m.parameters():
+                            nowd_params.append(p)
+                            captured.add(id(p))
+                # Catch remaining params
+                for p in child.parameters():
+                    if id(p) not in captured:
+                        nowd_params.append(p)
 
-        return wd_params, nowd_params
+        return wd_params, nowd_params, lr_mul_wd, lr_mul_nowd
 
 
 if __name__ == "__main__":
@@ -345,5 +352,8 @@ if __name__ == "__main__":
         with torch.no_grad():
             out, out16 = net(x)
         print("Output shapes:", out.shape, out16.shape)
-        assert out.shape[-2:] == (512, 512), "Final output must match input size"
+        assert out.shape[-2:] == (
+            512,
+            512,
+        ), "Final output must match input size"  # nosec B101
         print(f"✅ CABiNet {mode} forward pass successful!")

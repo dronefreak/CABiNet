@@ -12,6 +12,7 @@ from src.datasets.transform import (
     RandomGamma,
     RandomHorizontalFlip,
     RandomNoise,
+    RandomRotate,
     RandomScale,
 )
 
@@ -211,3 +212,55 @@ class TestCompose:
         result = transform(sample_image_label)
 
         assert result == sample_image_label
+
+
+class TestRandomRotate:
+    """Test RandomRotate transformation."""
+
+    def test_rotate_label_border_is_ignore_label(self):
+        """After rotation the expanded border pixels in the label must be ignore_label (255),
+        not 0 (which would be a valid class ID like 'road')."""
+        ignore_label = 255
+        # Create a label image filled with class 1 so borders stand out
+        img = Image.new("RGB", (200, 200), color=(100, 100, 100))
+        lb = Image.new("L", (200, 200), color=1)
+
+        transform = RandomRotate(degrees=(45, 45), ignore_label=ignore_label)
+        result = transform({"im": img, "lb": lb})
+
+        lb_np = np.array(result["lb"])
+        # Corner pixels are introduced by expand=True rotation; they must be ignore_label
+        corners = [lb_np[0, 0], lb_np[0, -1], lb_np[-1, 0], lb_np[-1, -1]]
+        for corner_val in corners:
+            assert corner_val == ignore_label, (
+                f"Corner pixel value {corner_val} is not ignore_label ({ignore_label}). "
+                "Rotation border fills valid class IDs — use fillcolor=ignore_label."
+            )
+
+    def test_rotate_label_no_zero_border(self):
+        """Border pixels after rotation must not be 0 (valid road class in Cityscapes)."""
+        ignore_label = 255
+        img = Image.new("RGB", (100, 100), color=(50, 50, 50))
+        lb = Image.new("L", (100, 100), color=5)  # class 5 — non-zero
+
+        transform = RandomRotate(degrees=(30, 30), ignore_label=ignore_label)
+        result = transform({"im": img, "lb": lb})
+
+        lb_np = np.array(result["lb"])
+        # All pixels should be either class 5 (original) or 255 (border)
+        unique_vals = set(np.unique(lb_np).tolist())
+        assert unique_vals.issubset(
+            {5, ignore_label}
+        ), f"Unexpected label values after rotation: {unique_vals - {5, ignore_label}}"
+
+    def test_rotate_image_label_same_size(self):
+        """Image and label must remain the same spatial size after rotation."""
+        img = Image.new("RGB", (160, 120), color=(128, 128, 128))
+        lb = Image.new("L", (160, 120), color=2)
+
+        transform = RandomRotate(degrees=(20, 20), ignore_label=255)
+        result = transform({"im": img, "lb": lb})
+
+        assert (
+            result["im"].size == result["lb"].size
+        ), "Image and label must have same size after rotation"

@@ -9,7 +9,8 @@ Transforms include:
 - Regularization: RandomCutout, RandomGaussianBlur
 """
 
-import random
+import random  # nosec B311 — used for data augmentation, not security/cryptographic purposes
+from typing import Any
 
 from PIL import Image, ImageEnhance
 import numpy as np
@@ -36,11 +37,10 @@ class RandomScale(object):
     def __call__(self, im_lb):
         im = im_lb["im"]
         lb = im_lb["lb"]
-        assert isinstance(im, Image.Image) and isinstance(
-            lb, Image.Image
-        ), f"Expected PIL images, got {type(im)}, {type(lb)}"
+        if not (isinstance(im, Image.Image) and isinstance(lb, Image.Image)):
+            raise TypeError(f"Expected PIL images, got {type(im)}, {type(lb)}")
 
-        scale = random.choice(self.scales)
+        scale = random.choice(self.scales)  # nosec B311
         W, H = im.size
         w = int(round(W * scale))
         h = int(round(H * scale))
@@ -71,7 +71,8 @@ class RandomCrop(object):
     def __call__(self, im_lb):
         im = im_lb["im"]
         lb = im_lb["lb"]
-        assert isinstance(im, Image.Image) and isinstance(lb, Image.Image)
+        if not (isinstance(im, Image.Image) and isinstance(lb, Image.Image)):
+            raise TypeError(f"Expected PIL images, got {type(im)}, {type(lb)}")
 
         target_w, target_h = self.size
         w, h = im.size
@@ -80,8 +81,9 @@ class RandomCrop(object):
             pad_w = max(target_w - w, 0)
             pad_h = max(target_h - h, 0)
             if pad_w > 0 or pad_h > 0:
-                # Pad image
+                # Pad image — pad_width type varies by ndim, annotated as Any
                 im_np = np.array(im)
+                pad_width: Any
                 if len(im_np.shape) == 3:
                     pad_width = ((0, pad_h), (0, pad_w), (0, 0))
                 else:
@@ -93,8 +95,8 @@ class RandomCrop(object):
                 lb_np = np.array(lb)
                 lb_np = np.pad(
                     lb_np, ((0, pad_h), (0, pad_w)), constant_values=self.ignore_label
-                )
-                lb = Image.fromarray(lb_np, mode="L")
+                ).astype(np.uint8)
+                lb = Image.fromarray(lb_np)
 
         w, h = im.size
         if w < target_w or h < target_h:
@@ -103,8 +105,8 @@ class RandomCrop(object):
             im = im.resize((new_w, new_h), Image.BILINEAR)
             lb = lb.resize((new_w, new_h), Image.NEAREST)
 
-        sw = random.randint(0, w - target_w) if w > target_w else 0
-        sh = random.randint(0, h - target_h) if h > target_h else 0
+        sw = random.randint(0, w - target_w) if w > target_w else 0  # nosec B311
+        sh = random.randint(0, h - target_h) if h > target_h else 0  # nosec B311
         crop_box = (sw, sh, sw + target_w, sh + target_h)
 
         im_lb["im"] = im.crop(crop_box)
@@ -225,14 +227,21 @@ class RandomRotate(object):
     """Small random rotation to simulate UAV yaw changes."""
 
     def __init__(
-        self, degrees=(-15, 15), interp_image=Image.BILINEAR, interp_label=Image.NEAREST
+        self,
+        degrees=(-15, 15),
+        interp_image=Image.BILINEAR,
+        interp_label=Image.NEAREST,
+        ignore_label=255,
     ):
         self.degrees = degrees
         self.interp_image = interp_image
         self.interp_label = interp_label
+        self.ignore_label = ignore_label
 
     def __call__(self, im_lb):
         angle = random.uniform(*self.degrees)
         im = im_lb["im"].rotate(angle, resample=self.interp_image, expand=True)
-        lb = im_lb["lb"].rotate(angle, resample=self.interp_label, expand=True)
+        lb = im_lb["lb"].rotate(
+            angle, resample=self.interp_label, expand=True, fillcolor=self.ignore_label
+        )
         return {"im": im, "lb": lb}

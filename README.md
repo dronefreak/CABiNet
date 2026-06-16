@@ -16,10 +16,10 @@ CABiNet (Context Aggregation Network) is a dual-branch convolutional neural netw
 
 ## Performance
 
-| Dataset | mIoU | FPS (RTX 2080Ti) | FPS (Jetson Xavier NX) |
-|---------|------|------------------|------------------------|
-| Cityscapes | 75.9% | 76 | 8 |
-| UAVid | 63.5% | 15 | - |
+| Dataset    | mIoU  | FPS (RTX 2080Ti) | FPS (Jetson Xavier NX) |
+| ---------- | ----- | ---------------- | ---------------------- |
+| Cityscapes | 75.9% | 76               | 8                      |
+| UAVid      | 63.5% | 15               | -                      |
 
 ## Architecture
 
@@ -40,7 +40,7 @@ Comparison of semantic segmentation results on the Cityscapes validation set:
 
 ![Cityscapes Results](imgs/citys.jpg)
 
-*From top to bottom: Input RGB images, SwiftNet predictions, CABiNet predictions (red boxes highlight improvements), ground truth*
+_From top to bottom: Input RGB images, SwiftNet predictions, CABiNet predictions (red boxes highlight improvements), ground truth_
 
 ### UAVid Dataset
 
@@ -48,7 +48,7 @@ Performance on the UAVid validation set for aerial imagery:
 
 ![UAVid Results](imgs/uavid_r.jpg)
 
-*Columns: Input images, State-of-the-art predictions, CABiNet predictions (white boxes show improvements)*
+_Columns: Input images, State-of-the-art predictions, CABiNet predictions (white boxes show improvements)_
 
 ## Installation
 
@@ -61,12 +61,14 @@ Performance on the UAVid validation set for aerial imagery:
 ### Quick Setup
 
 1. **Clone the repository**:
+
    ```bash
    git clone https://github.com/dronefreak/CABiNet.git
    cd CABiNet
    ```
 
 2. **Create and activate environment**:
+
    ```bash
    # Using conda with provided environment file
    conda env create -f environment.yml
@@ -180,6 +182,7 @@ CABiNet/
    - `leftImg8bit_trainvaltest.zip` (11GB) - RGB images
 
 2. **Extract and configure**:
+
    ```bash
    # Extract datasets
    unzip gtFine_trainvaltest.zip -d data/cityscapes/
@@ -307,6 +310,7 @@ Contributions are welcome! Please see [`CONTRIBUTING.md`](CONTRIBUTING.md) for g
 If you find this work helpful, please consider citing our papers:
 
 **ICRA 2021**:
+
 ```bibtex
 @INPROCEEDINGS{9560977,
   author={Kumaar, Saumya and Lyu, Ye and Nex, Francesco and Yang, Michael Ying},
@@ -319,6 +323,7 @@ If you find this work helpful, please consider citing our papers:
 ```
 
 **ISPRS Journal 2021**:
+
 ```bibtex
 @article{YANG2021124,
   title = {Real-time Semantic Segmentation with Context Aggregation Network},

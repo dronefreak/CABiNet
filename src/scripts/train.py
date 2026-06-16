@@ -37,7 +37,7 @@ def seed_everything(seed: int):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False  # Must be False when deterministic=True
 
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="train")
@@ -66,8 +66,6 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         # Add more datasets here as needed
     }
 
-    console.print("Preparing dataloaders!", style="info")
-
     # Retrieve the dataset class dynamically
     dataset_cls = DATASET_REGISTRY.get(cfg.dataset.name.lower())
     if dataset_cls is None:
@@ -81,10 +79,10 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         cropsize=cropsize,
     )
 
-    # Create the three splits
+    # Create splits — ds_val and ds_test both use "val" split
+    # (Cityscapes/UAVid do not have a labelled test split)
     ds_train = dataset_cls(**common_args, mode="train")
     ds_val = dataset_cls(**common_args, mode="val")
-    ds_test = dataset_cls(**common_args, mode="val")
 
     # Create DataLoaders
     dl_train = DataLoader(
@@ -100,20 +98,21 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     dl_val = DataLoader(
         ds_val,
         batch_size=batch_size,
-        shuffle=False,  # <<<<<<<<<< FIX: Validation should NOT shuffle
+        shuffle=False,
         num_workers=n_workers,
         pin_memory=True,
-        drop_last=False,  # <<<<<<<<<< Better for eval consistency
+        drop_last=False,
         persistent_workers=True if n_workers > 0 else False,
         collate_fn=uavid_collate_fn if cfg.dataset.name.lower() == "uavid" else None,
     )
+    # Final eval DataLoader: same val split but uses eval batch_size from config
     dl_test = DataLoader(
-        ds_test,
+        ds_val,
         batch_size=cfg.validation_config.batch_size,
-        shuffle=False,  # <<<<<<<<<< FIX: Validation should NOT shuffle
+        shuffle=False,
         num_workers=n_workers,
         pin_memory=True,
-        drop_last=False,  # <<<<<<<<<< Better for eval consistency
+        drop_last=False,
         persistent_workers=True if n_workers > 0 else False,
         collate_fn=uavid_collate_fn if cfg.dataset.name.lower() == "uavid" else None,
     )
@@ -185,7 +184,6 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         im = im.to(device, non_blocking=True)
         lb = lb.to(device, non_blocking=True).squeeze(1)  # Remove channel dim
 
-        optim.zero_grad()
         with torch.amp.autocast(device_type=device.type, enabled=True):
             out, out16 = net(im)
             loss = (criteria_p(out, lb) + criteria_16(out16, lb)) / accum_steps
@@ -194,7 +192,6 @@ def train_and_evaluate(cfg: DictConfig) -> None:
             scaler.step(optim)
             scaler.update()
             optim.zero_grad()
-        torch.cuda.synchronize()  # Only needed if measuring time
 
         return loss.item()
 
@@ -219,6 +216,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
             # --- Training Phase ---
             net.train()
             train_loss = 0.0
+            optim.zero_grad()  # Reset grads at start of each epoch for accumulation
             train_pbar = tqdm(dl_train, desc=f"Epoch [{epoch+1}/{epochs}] - Train")
             for i, (ims, lbs) in enumerate(train_pbar):
                 loss = train_step(ims, lbs, i)
@@ -309,10 +307,11 @@ def train_and_evaluate(cfg: DictConfig) -> None:
         flip=True,
     )
     results = evaluator.evaluate()
-    mIoU = results["mIoU"]
-    accuracy = results["accuracy"]
-    console.print(f"🏁 Final mIoU on validation set: {mIoU}", style="info")
-    console.print(f"🏁 Final Accuracy on validation set: {accuracy}", style="info")
+    if results:  # Non-empty only on rank 0 in distributed mode
+        mIoU = results["mIoU"]
+        accuracy = results["accuracy"]
+        console.print(f"🏁 Final mIoU on validation set: {mIoU}", style="info")
+        console.print(f"🏁 Final Accuracy on validation set: {accuracy}", style="info")
 
 
 if __name__ == "__main__":

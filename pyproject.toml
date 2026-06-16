@@ -37,6 +37,7 @@ sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 [tool.pytest.ini_options]
 addopts = "-ra -q"
 testpaths = ["tests"]
+pythonpath = ["."]
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
@@ -49,3 +50,14 @@ warn_unused_configs = true
 disallow_untyped_defs = false  # Relax for fast prototyping
 check_untyped_defs = true
 no_implicit_optional = true
+
+# Source - https://stackoverflow.com/a/73649493
+# Posted by Aaron Alphonso
+# Retrieved 2026-06-15, License - CC BY-SA 4.0
+
+[tool.bandit.assert_used]
+skips = ['*_test.py', '*/test_*.py', 'src/*/*.py']
+
+[tool.bandit]
+# B311: standard random module is intentional for data augmentation (not security/crypto)
+skips = ["B311", "B101"]
