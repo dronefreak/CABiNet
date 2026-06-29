@@ -7,6 +7,7 @@ from src.models.cab import ContextAggregationBlock, PSPModule
 from src.models.cabinet import AttentionBranch, ConvBNReLU, SpatialBranch
 from src.models.constants import MODEL_CONFIG
 from src.models.layers import DepthwiseConv, DepthwiseSeparableConv
+from src.models.mobilenetv3 import InvertedResidual, MobileNetV3
 
 
 class TestLayerComponents:
@@ -171,3 +172,37 @@ class TestCABiNetModel:
         assert out.is_cuda
         assert out16.is_cuda
         assert out.shape == (1, num_classes, 512, 512)
+
+
+class TestMobileNetV3Validation:
+    """Tests verifying that MobileNetV3 raises proper errors for invalid inputs."""
+
+    def test_invalid_mode_raises_value_error(self):
+        """MobileNetV3 must raise ValueError for unknown mode (not AssertionError).
+
+        assert statements are stripped by Python's -O flag, so production code
+        must use explicit raises.
+        """
+        cfgs = [[3, 1, 16, 1, 0, 2]]  # minimal config
+        with pytest.raises(ValueError, match="mode must be"):
+            MobileNetV3(cfgs=cfgs, mode="xlarge")
+
+    def test_invalid_stride_raises_value_error(self):
+        """InvertedResidual must raise ValueError for stride not in {1, 2}."""
+        with pytest.raises(ValueError, match="stride must be"):
+            InvertedResidual(
+                inp=16,
+                hidden_dim=16,
+                oup=16,
+                kernel_size=3,
+                stride=3,
+                use_se=False,
+                use_hs=False,
+            )
+
+    def test_valid_modes_do_not_raise(self):
+        """MobileNetV3 must accept both 'large' and 'small' without error."""
+        cfgs = [[3, 1, 16, 1, 0, 2]]
+        for mode in ("large", "small"):
+            # Should not raise
+            MobileNetV3(cfgs=cfgs, mode=mode)

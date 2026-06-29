@@ -102,7 +102,8 @@ def conv_1x1_bn(inp, oup):
 class InvertedResidual(torch.nn.Module):
     def __init__(self, inp, hidden_dim, oup, kernel_size, stride, use_se, use_hs):
         super(InvertedResidual, self).__init__()
-        assert stride in [1, 2]
+        if stride not in [1, 2]:
+            raise ValueError(f"stride must be 1 or 2, got {stride}")
 
         self.identity = stride == 1 and inp == oup
 
@@ -164,7 +165,8 @@ class MobileNetV3(torch.nn.Module):
         # setting of inverted residual blocks
         self.cfgs = cfgs
         self.weights = weights
-        assert mode in ["large", "small"]
+        if mode not in ["large", "small"]:
+            raise ValueError(f"mode must be 'large' or 'small', got '{mode}'")
 
         # building first layer
         input_channel = _make_divisible(16 * width_mult, 8)

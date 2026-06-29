@@ -25,7 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           # CPU-only torch so mypy can resolve torch types without a 5 GB GPU download
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install ruff mypy bandit
+          pip install -e ".[dev]"
 
       - name: Lint with ruff
         run: |
@@ -59,11 +59,8 @@ jobs:
           python -m pip install --upgrade pip
           # Install CPU-only torch first to avoid downloading the 5 GB CUDA wheel
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          # Install remaining project deps (requirements.txt excludes torch when already present)
-          pip install -r requirements.txt
-          pip install pytest pytest-cov
-          # Editable install so `from src.models...` works without PYTHONPATH tricks
-          pip install -e .
+          # Install package + dev extras (replaces requirements.txt)
+          pip install -e ".[dev]"
 
       - name: Run tests
         # Unset PYTHONPATH to prevent system packages (e.g. ROS) from leaking in
