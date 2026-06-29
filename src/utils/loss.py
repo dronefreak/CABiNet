@@ -27,14 +27,13 @@ class OhemCELoss(nn.Module):
         self.thresh = float(thresh)
         self.n_min = int(n_min)
         self.ignore_lb = ignore_lb
-        self.register_buffer("weight", weight)  # Safe device transfer
-
-        # Use reduction='none' to get per-pixel loss
-        self.criteria = nn.CrossEntropyLoss(
-            ignore_index=ignore_lb,
-            reduction="none",
-            weight=weight,  # Apply class weights here
-        )
+        # Register weight as a buffer so it tracks device with .to() / .cuda()
+        # We do NOT store a second copy inside nn.CrossEntropyLoss — that object
+        # does not move its internal weight reference when the parent module is
+        # moved to a new device, which would cause a device mismatch at runtime.
+        if weight is not None and not isinstance(weight, torch.Tensor):
+            weight = torch.tensor(weight, dtype=torch.float32)
+        self.register_buffer("weight", weight)
 
     def forward(self, logits, labels):
         """
@@ -44,8 +43,18 @@ class OhemCELoss(nn.Module):
         Returns:
             scalar loss
         """
-        # Compute per-pixel CE loss (already ignores `ignore_lb`)
-        loss = self.criteria(logits, labels)  # (N, H, W)
+        # Compute per-pixel CE loss via F.cross_entropy so the weight buffer
+        # (self.weight, moved correctly by .to()/.cuda()) is always on the right device.
+        cls_weight: "torch.Tensor | None" = (
+            self.weight if isinstance(self.weight, torch.Tensor) else None
+        )
+        loss = F.cross_entropy(
+            logits,
+            labels,
+            weight=cls_weight,
+            ignore_index=self.ignore_lb,
+            reduction="none",
+        )  # (N, H, W)
 
         # Flatten and remove ignored entries
         valid_mask = labels != self.ignore_lb  # (N, H, W)

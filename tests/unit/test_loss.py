@@ -72,6 +72,39 @@ class TestOhemCELoss:
         assert logits.grad is not None
         assert not torch.isnan(logits.grad).any()
 
+    def test_ohem_loss_no_criteria_submodule(self):
+        """OhemCELoss must not store a separate nn.CrossEntropyLoss sub-module.
+
+        Storing nn.CrossEntropyLoss(weight=w) as self.criteria creates a second
+        weight reference that does NOT move when the parent is moved to a new device,
+        causing a device mismatch error on CUDA forward passes.
+        """
+        weights = torch.ones(19)
+        loss_fn = OhemCELoss(thresh=0.7, n_min=100, ignore_lb=255, weight=weights)
+        # There must be no nested nn.Module child (criteria was the old pattern)
+        assert not hasattr(loss_fn, "criteria"), (
+            "OhemCELoss must not store an nn.CrossEntropyLoss sub-module; "
+            "use F.cross_entropy with self.weight in forward() instead."
+        )
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+    def test_ohem_loss_cuda_no_device_mismatch(self):
+        """Regression: OhemCELoss with class weights must not raise a device-mismatch
+        error when the loss module is moved to CUDA after construction with CPU weights.
+        """
+        weights = torch.ones(19)  # CPU tensor
+        weights[0] = 2.0
+        loss_fn = OhemCELoss(thresh=0.7, n_min=100, ignore_lb=255, weight=weights)
+        loss_fn = loss_fn.cuda()  # Must move weight buffer to CUDA
+
+        logits = torch.randn(2, 19, 32, 32).cuda()
+        labels = torch.randint(0, 19, (2, 32, 32)).cuda()
+
+        # Previously raised: RuntimeError: Expected all tensors to be on the same device
+        loss = loss_fn(logits, labels)
+        assert not torch.isnan(loss)
+        assert loss.item() >= 0
+
 
 class TestSoftmaxFocalLoss:
     """Test Softmax Focal Loss."""

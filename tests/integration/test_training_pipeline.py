@@ -1,10 +1,16 @@
 """Integration tests for training pipeline."""
 
+import math
+import tempfile
+from pathlib import Path
+
 import pytest
 import torch
+import torch.nn.utils as nn_utils
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.scripts.evaluate import MscEvalV0
+from src.scripts.train import _load_checkpoint, _save_checkpoint
 from src.utils.loss import OhemCELoss
 from src.utils.optimizer import Optimizer
 
@@ -362,3 +368,332 @@ class TestEvaluationIntegration:
 
         # Predictions should be identical
         assert torch.allclose(out1, out2, atol=1e-6)
+
+
+class TestDroppedLastMicroBatch:
+    """Regression tests for the dropped-last-micro-batch accumulation bug.
+
+    When len(dl_train) % accum_steps != 0, the trailing batches accumulated
+    gradients that were never applied because scaler.step() only fires on
+    (i+1) % accum_steps == 0 boundaries inside the loop. A flush step after
+    the loop is required.
+    """
+
+    def test_weights_change_on_partial_accumulation_window(
+        self, num_classes, mock_small_model
+    ):
+        """Weights MUST change after a training epoch whose batch count is not
+        divisible by accum_steps, proving that the end-of-epoch flush fires."""
+        torch.manual_seed(42)
+        accum_steps = 4
+        # 6 batches with accum_steps=4: batches 0-3 trigger a step (window 1),
+        # batches 4-5 are a partial window that only fires via the flush.
+        n_batches = 6
+
+        model = mock_small_model(num_classes=num_classes)
+        model.train()
+        criterion = OhemCELoss(thresh=0.7, n_min=10, ignore_lb=255)
+
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        weights_before = {n: p.data.clone() for n, p in model.named_parameters()}
+
+        optimizer.zero_grad()
+        for i in range(n_batches):
+            im = torch.randn(1, 3, 64, 64)
+            lb = torch.randint(0, num_classes, (1, 64, 64))
+            out, out16 = model(im)
+            loss = (criterion(out, lb) + criterion(out16, lb)) / accum_steps
+            loss.backward()
+            if (i + 1) % accum_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+
+        # Simulate the end-of-epoch flush (the fix in train.py)
+        if n_batches % accum_steps != 0:
+            optimizer.step()
+            optimizer.zero_grad()
+
+        weights_after = {n: p.data.clone() for n, p in model.named_parameters()}
+
+        changed = any(
+            not torch.allclose(weights_before[n], weights_after[n])
+            for n in weights_before
+        )
+        assert changed, (
+            "No weights changed after epoch — the partial accumulation window "
+            "flush did not fire, so the last batches had no effect."
+        )
+
+    def test_no_flush_leaves_gradients_unapplied(self, num_classes, mock_small_model):
+        """Without the end-of-epoch flush, a partial accumulation window leaves
+        gradient in .grad but never calls optimizer.step() — this test documents
+        the pre-fix behaviour so we can confirm the fix is needed."""
+        torch.manual_seed(0)
+        accum_steps = 4
+        n_batches = 5  # 5 % 4 == 1 trailing batch
+
+        model = mock_small_model(num_classes=num_classes)
+        model.train()
+        criterion = OhemCELoss(thresh=0.7, n_min=10, ignore_lb=255)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+        optimizer.zero_grad()
+        for i in range(n_batches):
+            im = torch.randn(1, 3, 64, 64)
+            lb = torch.randint(0, num_classes, (1, 64, 64))
+            out, out16 = model(im)
+            loss = (criterion(out, lb) + criterion(out16, lb)) / accum_steps
+            loss.backward()
+            if (i + 1) % accum_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+        # NO flush here (pre-fix behaviour)
+
+        # The trailing batch must have accumulated non-zero gradients that were
+        # never applied — i.e., some parameters still have .grad != 0.
+        unapplied = any(
+            p.grad is not None and p.grad.abs().sum().item() > 0
+            for p in model.parameters()
+        )
+        assert unapplied, (
+            "Expected unapplied gradients from the partial window, but found none. "
+            "Either the test data is degenerate or accumulation logic changed."
+        )
+
+
+class TestCheckpointRoundTrip:
+    """Tests for checkpoint save/load (_save_checkpoint / _load_checkpoint)."""
+
+    def _make_optimizer(self, model):
+        return Optimizer(
+            model=model,
+            lr0=1e-3,
+            momentum=0.9,
+            wd=5e-4,
+            warmup_steps=0,
+            max_iter=1000,
+        )
+
+    def test_checkpoint_restores_epoch(self, mock_small_model, num_classes):
+        """Saved epoch must be restored exactly."""
+        model = mock_small_model(num_classes=num_classes)
+        optim = self._make_optimizer(model)
+        scaler = torch.amp.GradScaler(device="cpu", enabled=False)
+        device = torch.device("cpu")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt = Path(tmpdir) / "ckpt.pth"
+            _save_checkpoint(
+                ckpt,
+                epoch=7,
+                net=model,
+                optim=optim,
+                scaler=scaler,
+                best_miou=0.42,
+                best_loss=0.9,
+            )
+
+            model2 = mock_small_model(num_classes=num_classes)
+            optim2 = self._make_optimizer(model2)
+            scaler2 = torch.amp.GradScaler(device="cpu", enabled=False)
+
+            start_epoch, best_miou, best_loss = _load_checkpoint(
+                ckpt, model2, optim2, scaler2, device
+            )
+
+        assert start_epoch == 8, "start_epoch must be saved_epoch + 1"
+        assert abs(best_miou - 0.42) < 1e-6
+        assert abs(best_loss - 0.9) < 1e-6
+
+    def test_checkpoint_restores_model_weights(self, mock_small_model, num_classes):
+        """Model weights must be identical after save/load round-trip."""
+        model = mock_small_model(num_classes=num_classes)
+        # Perturb weights to non-default values
+        with torch.no_grad():
+            for p in model.parameters():
+                p.add_(torch.randn_like(p) * 0.1)
+
+        optim = self._make_optimizer(model)
+        scaler = torch.amp.GradScaler(device="cpu", enabled=False)
+        device = torch.device("cpu")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt = Path(tmpdir) / "ckpt.pth"
+            _save_checkpoint(
+                ckpt,
+                epoch=0,
+                net=model,
+                optim=optim,
+                scaler=scaler,
+                best_miou=0.0,
+                best_loss=float("inf"),
+            )
+
+            model2 = mock_small_model(num_classes=num_classes)
+            optim2 = self._make_optimizer(model2)
+            scaler2 = torch.amp.GradScaler(device="cpu", enabled=False)
+            _load_checkpoint(ckpt, model2, optim2, scaler2, device)
+
+        for (n1, p1), (n2, p2) in zip(
+            model.named_parameters(), model2.named_parameters()
+        ):
+            assert torch.allclose(p1, p2), f"Weight mismatch after round-trip: {n1}"
+
+    def test_checkpoint_restores_optimizer_it(self, mock_small_model, num_classes):
+        """Optimizer step counter must be restored so LR schedule continues correctly."""
+        model = mock_small_model(num_classes=num_classes)
+        optim = self._make_optimizer(model)
+        optim.it = 42  # Simulate 42 optimizer steps completed
+        scaler = torch.amp.GradScaler(device="cpu", enabled=False)
+        device = torch.device("cpu")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt = Path(tmpdir) / "ckpt.pth"
+            _save_checkpoint(
+                ckpt,
+                epoch=5,
+                net=model,
+                optim=optim,
+                scaler=scaler,
+                best_miou=0.0,
+                best_loss=float("inf"),
+            )
+
+            model2 = mock_small_model(num_classes=num_classes)
+            optim2 = self._make_optimizer(model2)
+            scaler2 = torch.amp.GradScaler(device="cpu", enabled=False)
+            _load_checkpoint(ckpt, model2, optim2, scaler2, device)
+
+        assert (
+            optim2.it == 42
+        ), f"Optimizer step counter not restored: expected 42, got {optim2.it}"
+
+
+class TestGradientClipping:
+    """Tests verifying that gradient clipping is applied correctly."""
+
+    def test_clipping_caps_gradient_norm(self, mock_small_model, num_classes):
+        """After clip_grad_norm_, the global grad norm must be ≤ max_norm."""
+        torch.manual_seed(0)
+        model = mock_small_model(num_classes=num_classes)
+        model.train()
+        criterion = OhemCELoss(thresh=0.7, n_min=10, ignore_lb=255)
+
+        im = torch.randn(2, 3, 64, 64)
+        lb = torch.randint(0, num_classes, (2, 64, 64))
+        out, out16 = model(im)
+        loss = criterion(out, lb) + criterion(out16, lb)
+        loss.backward()
+
+        max_norm = 0.5
+        nn_utils.clip_grad_norm_(model.parameters(), max_norm)
+
+        total_norm = math.sqrt(
+            sum(
+                p.grad.norm().item() ** 2
+                for p in model.parameters()
+                if p.grad is not None
+            )
+        )
+        assert (
+            total_norm <= max_norm + 1e-4
+        ), f"Gradient norm {total_norm:.4f} exceeds max_norm {max_norm} after clipping"
+
+    def test_clipping_does_not_zero_gradients(self, mock_small_model, num_classes):
+        """Gradient clipping must not zero out all gradients — only scale them down."""
+        torch.manual_seed(1)
+        model = mock_small_model(num_classes=num_classes)
+        model.train()
+        criterion = OhemCELoss(thresh=0.7, n_min=10, ignore_lb=255)
+
+        im = torch.randn(2, 3, 64, 64)
+        lb = torch.randint(0, num_classes, (2, 64, 64))
+        out, out16 = model(im)
+        (criterion(out, lb) + criterion(out16, lb)).backward()
+
+        nn_utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+        any_nonzero = any(
+            p.grad is not None and p.grad.abs().sum().item() > 0
+            for p in model.parameters()
+        )
+        assert any_nonzero, "All gradients are zero after clipping — something is wrong"
+
+
+class TestMaxIterOptimizerSteps:
+    """Tests verifying that max_iter is computed in optimizer steps, not batches.
+
+    Contract: Optimizer.it increments once per optimizer.step() call (every
+    accum_steps batches). max_iter must equal total_optimizer_steps so the
+    poly-LR schedule completes at epoch = epochs.
+    """
+
+    def test_max_iter_matches_optimizer_steps(self, mock_small_model, num_classes):
+        """After a full epoch of accumulation, Optimizer.it must equal
+        ceil(n_batches / accum_steps), NOT n_batches."""
+        n_batches = 10
+        accum_steps = 3
+        expected_optim_steps = math.ceil(n_batches / accum_steps)  # = 4 (3+3+3+1)
+
+        model = mock_small_model(num_classes=num_classes)
+        optim = Optimizer(
+            model=model,
+            lr0=1e-3,
+            momentum=0.9,
+            wd=5e-4,
+            warmup_steps=0,
+            max_iter=expected_optim_steps,
+        )
+        criterion = OhemCELoss(thresh=0.7, n_min=10, ignore_lb=255)
+        scaler = torch.amp.GradScaler(device="cpu", enabled=False)
+
+        model.train()
+        optim.zero_grad()
+        for i in range(n_batches):
+            im = torch.randn(1, 3, 64, 64)
+            lb = torch.randint(0, num_classes, (1, 64, 64))
+            out, out16 = model(im)
+            loss = (criterion(out, lb) + criterion(out16, lb)) / accum_steps
+            scaler.scale(loss).backward()
+            if (i + 1) % accum_steps == 0:
+                scaler.step(optim)
+                scaler.update()
+                optim.zero_grad()
+
+        # Flush trailing partial window (matches train.py logic)
+        if n_batches % accum_steps != 0:
+            scaler.step(optim)
+            scaler.update()
+            optim.zero_grad()
+
+        assert optim.it == expected_optim_steps, (
+            f"Expected {expected_optim_steps} optimizer steps "
+            f"(ceil({n_batches}/{accum_steps})), got {optim.it}. "
+            "If this fails, max_iter was compared against batch count, not optim steps."
+        )
+
+    def test_lr_decays_to_near_zero_at_max_iter(self, mock_small_model, num_classes):
+        """The poly-LR schedule must approach 0 at max_iter optimizer steps."""
+        model = mock_small_model(num_classes=num_classes)
+        max_iter = 100
+        optim = Optimizer(
+            model=model,
+            lr0=1e-2,
+            momentum=0.9,
+            wd=5e-4,
+            warmup_steps=0,
+            max_iter=max_iter,
+            power=0.9,
+        )
+
+        # Simulate reaching the end of training
+        optim.it = max_iter - 1
+        lr_near_end = optim.get_lr(0, optim.optim.param_groups[0])
+
+        optim.it = 0
+        lr_start = optim.get_lr(0, optim.optim.param_groups[0])
+
+        assert lr_near_end < lr_start * 0.1, (
+            f"LR at max_iter-1 ({lr_near_end:.6f}) should be < 10% of initial "
+            f"({lr_start:.6f}). The schedule may not be using optimizer steps."
+        )

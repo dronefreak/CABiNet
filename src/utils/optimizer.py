@@ -17,6 +17,18 @@ class Optimizer:
       - Linear warmup
       - Polynomial decay
       - Support for lr-multiplied parameter groups (e.g., decoder)
+
+    max_iter CONTRACT
+    -----------------
+    `max_iter` is the total number of **optimizer steps** (i.e., calls to
+    ``Optimizer.step()``), *not* the total number of gradient-accumulation
+    micro-batches.  When gradient accumulation is used (accum_steps > 1),
+    the correct value is::
+
+        max_iter = ceil(epochs * batches_per_epoch / accum_steps)
+
+    train.py computes and passes this automatically.  Passing the raw batch
+    count makes the poly-LR schedule decay accum_steps× too slowly.
     """
 
     def __init__(

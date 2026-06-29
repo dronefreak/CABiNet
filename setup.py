@@ -1,3 +1,5 @@
-from setuptools import find_packages, setup
+from setuptools import setup
 
-setup(name="cabinet", version="1.0", packages=find_packages())
+# All metadata and dependencies are declared in pyproject.toml.
+# This file exists only for editable-install compatibility with older pip.
+setup()

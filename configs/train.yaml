@@ -18,11 +18,17 @@ training_config:
   optimizer_power: 0.9
   warmup_steps: 4000
   warmup_start_lr: 1e-5
-  max_iterations: 200000
+  # max_iterations is in OPTIMIZER STEPS (not batches).
+  # train.py computes this as ceil(epochs * batches_per_epoch / accum_steps).
+  # Setting it here is optional — if absent, train.py derives it automatically.
+  # If set, it overrides the derived value (useful for multi-phase schedules).
+  max_iterations: ~ # null → auto-computed from epochs/accum_steps
   class_balancing: true
+  max_grad_norm: 1.0 # Gradient clipping threshold; set to null/0 to disable
   log_iter: 20 # Renamed from 'msg_iterations' — clearer intent
   experiments_path: experiments/cabinet_experiments_large_1024x1024
   model_save_name: cabinet_citys_large_1024x1024.pth
+  resume: false # Set to true to resume from checkpoint_last.pth in experiments_path
 
 # Validation Configuration
 validation_config:
@@ -30,6 +36,7 @@ validation_config:
   num_workers: 8 # Explicitly set (can be lower than training)
   eval_scales: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75]
   flip: true
+  eval_every_n_epochs: 1 # Run per-epoch mIoU eval every N epochs (1=every epoch)
   results_path: ${training_config.experiments_path}/results # Consistent output location
   save_predictions: false # Optional: save .png preds during eval
 
