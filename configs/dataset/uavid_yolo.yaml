@@ -1,0 +1,62 @@
+# UAVid dataset configuration for Ultralytics YOLO semantic segmentation
+#
+# Format: https://docs.ultralytics.com/datasets/segment/
+# Masks:  single-channel PNG, pixel value = class index (0-6), 255 = ignore
+#
+# Pre-processing required
+# -----------------------
+# UAVid distributes 3-channel RGB colour-coded labels (Labels/ directory).
+# Convert them to YOLO single-channel format first:
+#
+#   python src/scripts/convert_uavid_to_yolo.py \
+#       --src /path/to/uavid \
+#       --dst /path/to/uavid_yolo \
+#       --info configs/UAVid_info.json \
+#       --split both
+#
+# Then set the ``path`` field below to /path/to/uavid_yolo.
+#
+# Class mapping (Clutter is excluded → YOLO ignore label 255)
+# -----------------------------------------------------------
+#   0  Building      [128,   0,   0]
+#   1  Road          [128,  64, 128]
+#   2  Static Car    [192,   0, 192]
+#   3  Tree          [  0, 128,   0]
+#   4  Vegetation    [128, 128,   0]
+#   5  Human         [ 64,  64,   0]
+#   6  Moving Car    [ 64,   0, 128]
+# 255  <ignore>      [  0,   0,   0]  (Clutter, ignoreInEval=true)
+
+# Root path — override via YOLO CLI:  yolo ... data=configs/dataset/uavid_yolo.yaml
+path: ${env:UAVID_YOLO_ROOT:/data/uavid_yolo}
+
+train: images/train # relative to path
+val: images/val # relative to path
+
+# Mask directories (must mirror images/ structure)
+mask_path: masks # single-channel PNGs relative to path
+
+# Number of semantic classes (Clutter excluded; mapped to ignore label 255)
+nc: 7
+
+# Class names — order must match the integer class IDs above
+names:
+  0: Building
+  1: Road
+  2: StaticCar
+  3: Tree
+  4: Vegetation
+  5: Human
+  6: MovingCar
+
+# Ultralytics training command example
+# -------------------------------------
+# yolo segment train \
+#     model=yolov8m-seg.pt \
+#     data=configs/dataset/uavid_yolo.yaml \
+#     imgsz=1024 \
+#     epochs=100 \
+#     batch=4 \
+#     device=0 \
+#     task=segment \
+#     overlap_mask=false

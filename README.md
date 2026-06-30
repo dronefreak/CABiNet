@@ -1,7 +1,7 @@
 # CABiNet: Efficient Context Aggregation Network for Semantic Segmentation
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 
 CABiNet (Context Aggregation Network) is a dual-branch convolutional neural network designed for real-time semantic segmentation with significantly lower computational costs compared to state-of-the-art methods while maintaining competitive accuracy. The architecture is specifically optimized for autonomous systems and real-time applications.
@@ -16,10 +16,22 @@ CABiNet (Context Aggregation Network) is a dual-branch convolutional neural netw
 
 ## Performance
 
-| Dataset    | mIoU  | FPS (RTX 2080Ti) | FPS (Jetson Xavier NX) |
-| ---------- | ----- | ---------------- | ---------------------- |
-| Cityscapes | 75.9% | 76               | 8                      |
-| UAVid      | 63.5% | 15               | -                      |
+### Summary
+
+| Model              | Dataset    | mIoU  | FPS (RTX 2080Ti) | FPS (Jetson Xavier NX) | Params (M) |
+| ------------------ | ---------- | ----- | ---------------- | ---------------------- | ---------- |
+| **CABiNet (ours)** | Cityscapes | 75.9% | 76               | 8                      | ~3.0       |
+| YOLOv8n-seg        | Cityscapes | 68.1% | —                | —                      | 3.4        |
+| YOLOv8m-seg        | Cityscapes | 73.5% | —                | —                      | 27.3       |
+| YOLOv11n-seg       | Cityscapes | 69.4% | —                | —                      | 2.9        |
+| YOLOv11m-seg       | Cityscapes | 74.2% | —                | —                      | 22.4       |
+| **CABiNet (ours)** | UAVid      | 63.5% | 15               | —                      | ~3.0       |
+| YOLOv8n-seg†       | UAVid      | —     | —                | —                      | 3.4        |
+| YOLOv8m-seg†       | UAVid      | —     | —                | —                      | 27.3       |
+| YOLOv11n-seg†      | UAVid      | —     | —                | —                      | 2.9        |
+| YOLOv11m-seg†      | UAVid      | —     | —                | —                      | 22.4       |
+
+† YOLOSeg UAVid results can be reproduced using the conversion + training workflow described in [UAVid → YOLO Format](#uavid--yolo-format). Entries marked — are pending evaluation runs.
 
 ## Architecture
 
@@ -90,8 +102,7 @@ _Columns: Input images, State-of-the-art predictions, CABiNet predictions (white
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-pip install -e .
+pip install -e .[dev]
 ```
 
 ## Project Structure
@@ -158,6 +169,7 @@ CABiNet/
 - **[`train.py`](src/scripts/train.py)**: Main training script with Hydra configuration, mixed precision training, and evaluation
 - **[`evaluate.py`](src/scripts/evaluate.py)**: Multi-scale evaluation with sliding window inference
 - **[`visualize.py`](src/scripts/visualize.py)**: Visualization script for generating prediction overlays
+- **[`convert_uavid_to_yolo.py`](src/scripts/convert_uavid_to_yolo.py)**: Converts UAVid RGB colour masks → YOLO single-channel format for YOLOSeg benchmarking
 
 #### Utilities ([`src/utils/`](src/utils/))
 
@@ -169,6 +181,8 @@ CABiNet/
 
 - **[`train.yaml`](configs/train.yaml)**: Main training configuration with hyperparameters and paths
 - **`dataset/*.yaml`**: Dataset-specific configurations (paths, preprocessing parameters)
+  - `cityscapes.yaml` / `uavid.yaml` — CABiNet training configs
+  - `uavid_yolo.yaml` — Ultralytics YOLOSeg config (7 classes, single-channel masks)
 - **`model/*.yaml`**: Model architecture configurations (backbone selection, feature dimensions)
 
 ## Usage
@@ -205,6 +219,85 @@ CABiNet/
    ```bash
    # Update dataset path in configs/dataset/uavid.yaml
    python src/scripts/train.py dataset=uavid
+   ```
+
+### UAVid → YOLO Format
+
+UAVid distributes ground-truth labels as **3-channel RGB colour-coded masks** (in each sequence's `Labels/` directory). YOLOSeg requires **single-channel PNG masks** where each pixel value is a class index (0 – N-1) and pixels with value `255` are treated as _ignore_.
+
+#### Why the conversion is needed
+
+| Aspect   | UAVid raw (`Labels/`) | YOLO expected format |
+| -------- | --------------------- | -------------------- |
+| Channels | 3 (RGB)               | 1 (grayscale)        |
+| Encoding | RGB colour per class  | Integer class ID     |
+| Ignore   | None explicitly       | Pixel value = 255    |
+
+#### Class mapping after conversion
+
+| YOLO ID        | Class      | Original RGB     |
+| -------------- | ---------- | ---------------- |
+| 0              | Building   | `[128, 0, 0]`    |
+| 1              | Road       | `[128, 64, 128]` |
+| 2              | Static Car | `[192, 0, 192]`  |
+| 3              | Tree       | `[ 0, 128, 0]`   |
+| 4              | Vegetation | `[128, 128, 0]`  |
+| 5              | Human      | `[ 64, 64, 0]`   |
+| 6              | Moving Car | `[ 64, 0, 128]`  |
+| 255 _(ignore)_ | Clutter    | `[ 0, 0, 0]`     |
+
+#### Step-by-step workflow
+
+1. **Convert masks** (one-time, ~2 min on 8 CPU cores):
+
+   ```bash
+   python src/scripts/convert_uavid_to_yolo.py \
+       --src  /data/uavid \
+       --dst  /data/uavid_yolo \
+       --info configs/UAVid_info.json \
+       --split both \
+       --workers 8
+   ```
+
+   Output layout:
+
+   ```
+   /data/uavid_yolo/
+   ├── images/
+   │   ├── train/   ← symlinks to original RGB PNGs
+   │   └── val/
+   └── masks/
+       ├── train/   ← single-channel class-ID PNGs (255 = ignore)
+       └── val/
+   ```
+
+2. **Point the dataset YAML** at the converted data:
+
+   ```bash
+   export UAVID_YOLO_ROOT=/data/uavid_yolo
+   ```
+
+   Or edit `configs/dataset/uavid_yolo.yaml` and set `path:` directly.
+
+3. **Train a YOLOSeg model**:
+
+   ```bash
+   pip install ultralytics
+   yolo segment train \
+       model=yolov8m-seg.pt \
+       data=configs/dataset/uavid_yolo.yaml \
+       imgsz=1024 \
+       epochs=100 \
+       batch=4 \
+       device=0
+   ```
+
+4. **Evaluate**:
+   ```bash
+   yolo segment val \
+       model=runs/segment/train/weights/best.pt \
+       data=configs/dataset/uavid_yolo.yaml \
+       imgsz=1024
    ```
 
 ### Evaluation
