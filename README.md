@@ -179,11 +179,14 @@ CABiNet/
 
 #### Configuration ([`configs/`](configs/))
 
-- **[`train.yaml`](configs/train.yaml)**: Main training configuration with hyperparameters and paths
+- **[`train.yaml`](configs/train.yaml)**: Main CABiNet training configuration (Hydra)
 - **`dataset/*.yaml`**: Dataset-specific configurations (paths, preprocessing parameters)
   - `cityscapes.yaml` / `uavid.yaml` — CABiNet training configs
-  - `uavid_yolo.yaml` — Ultralytics YOLOSeg config (7 classes, single-channel masks)
+  - `uavid_yolo.yaml` — Ultralytics dataset YAML (7 classes, single-channel masks, 255=ignore)
 - **`model/*.yaml`**: Model architecture configurations (backbone selection, feature dimensions)
+- **`yolo/*.yaml`**: Ultralytics YOLO training/evaluation configs
+  - [`uavid_train.yaml`](configs/yolo/uavid_train.yaml) — full training config (AMP, EMA, grad accum, resume, augmentation)
+  - [`uavid_val.yaml`](configs/yolo/uavid_val.yaml) — validation / benchmark config
 
 ## Usage
 
@@ -275,29 +278,65 @@ UAVid distributes ground-truth labels as **3-channel RGB colour-coded masks** (i
 
    ```bash
    export UAVID_YOLO_ROOT=/data/uavid_yolo
+   # or edit configs/dataset/uavid_yolo.yaml and set 'path:' directly
    ```
 
-   Or edit `configs/dataset/uavid_yolo.yaml` and set `path:` directly.
-
-3. **Train a YOLOSeg model**:
+3. **Install Ultralytics**:
 
    ```bash
    pip install ultralytics
-   yolo segment train \
-       model=yolov8m-seg.pt \
-       data=configs/dataset/uavid_yolo.yaml \
-       imgsz=1024 \
-       epochs=100 \
-       batch=4 \
-       device=0
    ```
 
-4. **Evaluate**:
+4. **Train** (uses the pre-configured `configs/yolo/uavid_train.yaml`):
+
    ```bash
-   yolo segment val \
-       model=runs/segment/train/weights/best.pt \
-       data=configs/dataset/uavid_yolo.yaml \
-       imgsz=1024
+   # Standard run — all important params are set in the config file:
+   #   • AMP / mixed precision  (amp=True)
+   #   • EMA                    (always on; 'best.pt' = EMA weights)
+   #   • Gradient accumulation  (nbs=64 → 64/batch=16 accumulation steps)
+   #   • Checkpointing          (save_period=10, best.pt + last.pt)
+   #   • Early stopping         (patience=30 epochs)
+   #   • Aerial augmentation    (flipud, mosaic, copy_paste tuned for UAVid)
+   #   • Class-imbalance        (cls_pw=0.5, inverse-frequency weighting)
+   yolo segment train cfg=configs/yolo/uavid_train.yaml
+
+   # Resume an interrupted run (picks up epoch, optimizer, EMA state from last.pt):
+   yolo segment train cfg=configs/yolo/uavid_train.yaml resume=True
+
+   # Multi-GPU (DDP) — gradient accumulation and EMA scale automatically:
+   yolo segment train cfg=configs/yolo/uavid_train.yaml device=0,1,2,3
+
+   # Swap variant — only override model/name:
+   yolo segment train cfg=configs/yolo/uavid_train.yaml \
+       model=yolov11m-seg.pt name=yolov11m
+   ```
+
+   > **Key parameters explained** (see [`configs/yolo/uavid_train.yaml`](configs/yolo/uavid_train.yaml) for all options with comments):
+   >
+   > | Parameter            | Value                    | Reason                                                                                |
+   > | -------------------- | ------------------------ | ------------------------------------------------------------------------------------- |
+   > | `nbs=64`             | grad accum = `nbs/batch` | Effective batch=64; matches CABiNet's `accum_steps=4` with `batch=4` → 16 micro-steps |
+   > | `amp=True`           | mixed precision          | ~2× speed-up; YOLO uses `torch.cuda.amp` internally                                   |
+   > | `overlap_mask=False` | semantic seg             | Disables instance-mask merging; required for single-channel class-ID masks            |
+   > | `resume=True`        | crash recovery           | Restores epoch, optimizer state, EMA state from `last.pt`                             |
+   > | `save_period=10`     | extra checkpoints        | Guards against losing more than 10 epochs on crash                                    |
+   > | `patience=30`        | early stopping           | Stops if val mIoU doesn't improve for 30 epochs                                       |
+   > | `cls_pw=0.5`         | class imbalance          | Upweights rare classes (Human, Moving Car) in loss                                    |
+   > | `flipud=0.2`         | augmentation             | Vertical flip valid for top-down UAV view                                             |
+   > | `mosaic=0.8`         | augmentation             | Increases small-object diversity (cars, humans)                                       |
+   > | EMA                  | always on                | `best.pt` / `last.pt` are EMA-averaged; no separate flag needed                       |
+
+5. **Evaluate**:
+
+   ```bash
+   # Single-scale validation (matches 'val' split in uavid_yolo.yaml):
+   yolo segment val cfg=configs/yolo/uavid_val.yaml \
+       model=runs/uavid/yolov8m/weights/best.pt
+
+   # Test-time augmentation (TTA) — closer to CABiNet multi-scale eval:
+   yolo segment val cfg=configs/yolo/uavid_val.yaml \
+       model=runs/uavid/yolov8m/weights/best.pt \
+       augment=True
    ```
 
 ### Evaluation

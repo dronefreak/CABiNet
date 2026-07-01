@@ -4,6 +4,7 @@
 import json
 import os
 import os.path as osp
+from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
 import numpy as np
@@ -24,107 +25,158 @@ from src.datasets.transform import (
 )
 
 
-def uavid_collate_fn(batch):
+def uavid_collate_fn(batch: List[Dict[str, Any]]) -> Tuple[torch.Tensor, torch.Tensor]:
     """Collate function for UAVid that flattens patch lists into batch dimension.
 
     Each item in batch has 4 patches → output batch size = 4 * N
     """
-    all_imgs = []
-    all_labels = []
-    names = []
+    all_imgs: List[torch.Tensor] = []
+    all_labels: List[torch.Tensor] = []
 
     for item in batch:
-        # item: dict with 'img_patches', 'label_patches', 'name'
-        all_imgs.extend(item["img_patches"])  # List of 4 tensors
+        all_imgs.extend(item["img_patches"])
         all_labels.extend(item["label_patches"])
-        names.extend([item["name"]] * 4)  # Track source
 
-    # Stack into single batch tensors
-    batched_imgs = torch.stack(all_imgs, dim=0)  # (4*N, 3, 1080, 1920)
-    batched_labels = torch.stack(all_labels, dim=0)  # (4*N, 1080, 1920)
+    batched_imgs = torch.stack(all_imgs, dim=0)  # (4*N, 3, H, W)
+    batched_labels = torch.stack(all_labels, dim=0)  # (4*N, H, W)
 
     return batched_imgs, batched_labels
 
 
 class UAVid(Dataset):
-    def __init__(self, config_file, ignore_lb, rootpth, cropsize, mode="train"):
-        super(UAVid, self).__init__()
+    """UAVid aerial semantic segmentation dataset.
+
+    Dataset layout (as distributed by UAVid)::
+
+        uavid_train/          ← *rootpth*
+        ├── seq1/
+        │   ├── Images/       ← RGB input images  (*.png)
+        │   └── Labels/       ← RGB colour-coded masks (*.png)
+        ├── seq2/
+        │   └── …
+        └── seq16/            ← example validation sequence
+
+    The ``Labels/`` directory contains **3-channel RGB colour-coded masks**
+    where each pixel colour encodes a semantic class (defined in
+    ``UAVid_info.json``).  This loader converts them to single-channel
+    trainId masks on-the-fly via a pre-built lookup table.
+
+    Class mapping (n_classes=8)
+    ---------------------------
+    Clutter is included in the loss (trainId=0) but should be excluded when
+    computing the mIoU metric (``ignoreInEval=True``).
+
+    Parameters
+    ----------
+    config_file:
+        Path to ``UAVid_info.json`` (colour palette + class metadata).
+    ignore_lb:
+        Label value used for pixels not matching any known colour
+        (default 255, passed in from config).
+    rootpth:
+        Root directory that directly contains the sequence folders
+        (``uavid_train/`` or equivalent).
+    cropsize:
+        ``(H, W)`` crop applied during training augmentation.
+    mode:
+        ``"train"`` or ``"val"``.
+    val_seqs:
+        Sequence folder names that belong to the validation split.
+        All other sequences found in *rootpth* are used for training.
+        Defaults to ``["seq16"]``.
+    """
+
+    def __init__(
+        self,
+        config_file: str,
+        ignore_lb: int,
+        rootpth: str,
+        cropsize: Tuple[int, int],
+        mode: str = "train",
+        val_seqs: Optional[List[str]] = None,
+    ) -> None:
+        super().__init__()
         self.mode = mode
-        self.config_file = config_file
         self.ignore_lb = ignore_lb
         self.rootpth = rootpth
         self.cropsize = tuple(cropsize)
+        self.val_seqs: set = set(val_seqs if val_seqs is not None else ["seq16"])
 
         if self.mode not in ("train", "val"):
             raise ValueError(f"Mode '{mode}' not supported. Choose 'train' or 'val'.")
         if not osp.exists(rootpth):
-            raise FileNotFoundError(f"Dataset path does not exist: {rootpth}")
+            raise FileNotFoundError(f"Dataset root does not exist: {rootpth}")
 
-        # We don't actually use config_file for
-        # anything because labels are already trainIds
-        # But keep it for consistency
-        with open(self.config_file, "r") as fr:
-            labels_info = json.load(fr)
+        # --- Build RGB → trainId lookup table from colour palette ----------
+        with open(config_file) as f:
+            labels_info: List[Dict[str, Any]] = json.load(f)
+        self._trainid_lut = self._build_trainid_lut(labels_info, ignore_lb)
         print(f"[INFO] Loaded {len(labels_info)} classes from {config_file}")
-        """Parse Image Directory."""
-        self.imgs = {}
-        imgnames = []
-        impth = osp.join(self.rootpth, self.mode)
-        folders = sorted(os.listdir(impth))
-        for fd in folders:
-            fdpth = osp.join(impth, fd, "Images")
-            if not osp.exists(fdpth):
+
+        # --- Discover sequences for this split ------------------------------
+        all_seqs = sorted(
+            s for s in os.listdir(rootpth) if osp.isdir(osp.join(rootpth, s))
+        )
+        if mode == "train":
+            use_seqs = [s for s in all_seqs if s not in self.val_seqs]
+        else:
+            use_seqs = [s for s in all_seqs if s in self.val_seqs]
+
+        if not use_seqs:
+            raise FileNotFoundError(
+                f"No sequences found for split='{mode}' in {rootpth}. "
+                f"val_seqs={self.val_seqs}, available={all_seqs}"
+            )
+
+        # --- Load image and label paths; key = "{seq}/{stem}" ---------------
+        # Using "{seq}/{stem}" prevents key collisions when the same filename
+        # (e.g. "000001.png") appears in multiple sequence folders.
+        self.imgs: Dict[str, str] = {}
+        self.labels: Dict[str, str] = {}
+        imgnames: List[str] = []
+
+        for seq in use_seqs:
+            img_dir = osp.join(rootpth, seq, "Images")
+            label_dir = osp.join(rootpth, seq, "Labels")
+            if not osp.exists(img_dir):
+                print(f"[WARN] Images/ not found for sequence {seq}, skipping.")
                 continue
-            im_names = [f for f in os.listdir(fdpth) if f.endswith(".png")]
-            names = [os.path.splitext(fn)[0] for fn in im_names]
-            paths = [osp.join(fdpth, fn) for fn in im_names]
-            imgnames.extend(names)
-            self.imgs.update(dict(zip(names, paths)))
+            for fn in sorted(os.listdir(img_dir)):
+                if not fn.endswith(".png"):
+                    continue
+                stem = osp.splitext(fn)[0]
+                key = f"{seq}/{stem}"
+                self.imgs[key] = osp.join(img_dir, fn)
+                label_path = osp.join(label_dir, fn)
+                if osp.exists(label_path):
+                    self.labels[key] = label_path
+                imgnames.append(key)
 
-        """ Parse GT Directory """
-        self.labels = {}
-        gtnames = []
-        gtpth = osp.join(self.rootpth, self.mode)
-        folders = sorted(os.listdir(gtpth))
-        for fd in folders:
-            fdpth = osp.join(gtpth, fd, "TrainId")
-            if not osp.exists(fdpth):
-                continue
-            lb_names = [f for f in os.listdir(fdpth) if f.endswith(".png")]
-            names = [os.path.splitext(fn)[0] for fn in lb_names]
-            paths = [osp.join(fdpth, fn) for fn in lb_names]
-            gtnames.extend(names)
-            self.labels.update(dict(zip(names, paths)))
-
-        self.imnames = imgnames
-        self.len = len(self.imnames)
-
-        # Safety check
-        missing = set(self.imnames) - set(self.labels.keys())
+        # Drop any image that has no matching label
+        missing = set(imgnames) - set(self.labels.keys())
         if missing:
             print(
-                f"[WARN] Missing labels for {len(missing)}"
-                f" images: {list(missing)[:5]}..."
+                f"[WARN] {len(missing)} image(s) have no Labels/ mask "
+                f"and will be skipped: {sorted(missing)[:5]}…"
             )
-        self.imnames = [name for name in self.imnames if name in self.labels]
+        self.imnames = [k for k in imgnames if k in self.labels]
         self.len = len(self.imnames)
-        """Preprocessing and Augmentation."""
+
+        # --- Image normalisation -------------------------------------------------
         self.to_tensor = transforms.Compose(
             [
                 transforms.ToTensor(),
                 transforms.Normalize(
-                    mean=(0.480, 0.499, 0.457), std=(0.225, 0.208, 0.228)
+                    mean=(0.480, 0.499, 0.457),
+                    std=(0.225, 0.208, 0.228),
                 ),
             ]
         )
 
-        # Training augmentations
-        # Only applied in 'train' mode
-        # Geometric → Photometric → Regularization is the recommended order.
+        # --- Training augmentation (Geometric → Photometric → Regularisation) ---
         self.trans_train = (
             Compose(
                 [
-                    # Geometric
                     RandomHorizontalFlip(p=0.2),
                     RandomRotate(degrees=(-10, 10), ignore_label=self.ignore_lb),
                     RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
@@ -133,11 +185,9 @@ class UAVid(Dataset):
                         pad_if_needed=True,
                         ignore_label=self.ignore_lb,
                     ),
-                    # Photometric
                     RandomColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
                     RandomGamma(gamma_range=(0.8, 1.2), p=0.3),
                     RandomNoise(mode="gaussian", sigma=0.03, p=0.3),
-                    # Regularization
                     RandomCutout(p=0.3, size=64),
                 ]
             )
@@ -145,107 +195,124 @@ class UAVid(Dataset):
             else None
         )
 
-        print(f"[INFO] UAVid dataset loaded: {self.len} samples ({mode})")
+        print(
+            f"[INFO] UAVid dataset loaded: {self.len} samples ({mode}) "
+            f"from {len(use_seqs)} sequence(s)"
+        )
 
-    def __getitem__(self, idx):
-        fn = self.imnames[idx]
-        impth = self.imgs[fn]
-        lbpth = self.labels[fn]
+    # -----------------------------------------------------------------------
+    # Helpers
+    # -----------------------------------------------------------------------
 
-        img = Image.open(impth).convert("RGB")  # (3840, 2160, 3)
-        label = Image.open(lbpth)  # (3840, 2160), mode='L', values=trainId
+    @staticmethod
+    def _build_trainid_lut(
+        labels_info: List[Dict[str, Any]], ignore_lb: int
+    ) -> np.ndarray:
+        """Build a (256, 256, 256) uint8 LUT mapping RGB colour → trainId.
 
-        w, h = img.size  # Should be 3840 x 2160
+        Known colours are mapped to their ``trainId`` value (0-7 for UAVid).
+        Unknown colours default to *ignore_lb* (255).
+
+        This is distinct from the YOLO LUT in ``convert_uavid_to_yolo.py``
+        which maps Clutter → 255; here Clutter maps to its trainId (0) so
+        that it is included in the cross-entropy loss while still being
+        excluded from the mIoU metric during evaluation.
+        """
+        lut = np.full((256, 256, 256), ignore_lb, dtype=np.uint8)
+        for cls in labels_info:
+            r, g, b = cls["color"]
+            lut[r, g, b] = cls["trainId"]
+        return lut
+
+    def _rgb_label_to_trainid(self, label_rgb: Image.Image) -> Image.Image:
+        """Convert a 3-channel RGB label PIL image to a single-channel trainId image."""
+        arr = np.array(label_rgb, dtype=np.uint8)  # (H, W, 3)
+        trainid = self._trainid_lut[arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]]  # (H, W)
+        return Image.fromarray(trainid)  # mode='L', uint8
+
+    # -----------------------------------------------------------------------
+    # Dataset interface
+    # -----------------------------------------------------------------------
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        key = self.imnames[idx]
+        img = Image.open(self.imgs[key]).convert("RGB")  # (W, H) = 3840×2160
+        label_rgb = Image.open(self.labels[key]).convert("RGB")  # RGB colour mask
+
+        # Convert RGB colour mask → single-channel trainId mask.
+        # This must happen BEFORE augmentation so that the pipeline receives
+        # a mode-L image (values 0-7 or ignore_lb), not a 3-channel array.
+        label = self._rgb_label_to_trainid(label_rgb)  # mode='L'
+
+        w, h = img.size  # 3840, 2160 for standard UAVid
         if w != 3840 or h != 2160:
-            # Resize only if needed (e.g., test set might vary)
             img = img.resize((3840, 2160), Image.BILINEAR)
             label = label.resize((3840, 2160), Image.NEAREST)
+            w, h = 3840, 2160
 
         half_w, half_h = w // 2, h // 2  # 1920, 1080
 
-        img_patches = []
-        label_patches = []
+        img_patches: List[torch.Tensor] = []
+        label_patches: List[torch.Tensor] = []
 
-        # Define the four quadrants
-        patches = [
+        for left, upper, right, lower in [
             (0, 0, half_w, half_h),  # top-left
             (half_w, 0, w, half_h),  # top-right
             (0, half_h, half_w, h),  # bottom-left
             (half_w, half_h, w, h),  # bottom-right
-        ]
+        ]:
+            img_patch = img.crop((left, upper, right, lower))
+            label_patch = label.crop((left, upper, right, lower))
 
-        for i, (left, upper, right, lower) in enumerate(patches):
-            box = (left, upper, right, lower)
-
-            # Crop image and label
-            img_patch = img.crop(box)
-            label_patch = label.crop(box)
-
-            # Apply training augmentations (optional: shared RNG for consistency?)
             if self.mode == "train" and self.trans_train is not None:
                 im_lb = {"im": img_patch, "lb": label_patch}
                 try:
                     im_lb = self.trans_train(im_lb)
                     img_patch, label_patch = im_lb["im"], im_lb["lb"]
-                except Exception as e:
-                    print(f"[WARN] Augmentation failed on patch {i} of {fn}: {e}")
+                except Exception as exc:
+                    print(f"[WARN] Augmentation failed on {key}: {exc}")
 
-            # Convert to tensor
-            img_tensor = self.to_tensor(img_patch)  # (3, H, W)
-
-            # Convert label to numpy -> long tensor
+            img_patches.append(self.to_tensor(img_patch))
             label_np = np.array(label_patch, dtype=np.int64)
-            label_tensor = torch.from_numpy(label_np).long()  # (H, W)
+            label_patches.append(torch.from_numpy(label_np).long())
 
-            img_patches.append(img_tensor)
-            label_patches.append(label_tensor)
-
-        # Return list of patches (will be flattened in collate_fn)
         return {
             "img_patches": img_patches,
             "label_patches": label_patches,
-            "name": fn,
+            "name": key,
             "original_size": (h, w),
         }
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.len
 
 
-# === Test Block (Fixed) ===
+# ---------------------------------------------------------------------------
+# Smoke test (run: python src/datasets/uavid.py)
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    from pathlib import Path
     import sys
 
-    # Resolve config path relative to this file
-    proj_root = Path(__file__).parent.parent.parent
-    config_path = proj_root / "legacy" / "train_uavid.json"
-
-    if not config_path.exists():
-        print(f"Config not found at {config_path}, skipping test.")
+    rootpth = os.environ.get("UAVID_TRAIN_ROOT", "")
+    config_file = "configs/UAVid_info.json"
+    if not rootpth:
+        print("Set UAVID_TRAIN_ROOT=/path/to/uavid_train and re-run.")
         sys.exit(0)
 
-    with open(config_path, "r") as f:
-        params = json.load(f)
-
-    dataset_config = params["dataset_config"]
-    ds = UAVid(
-        config_file=dataset_config["dataset_config_file"],
-        ignore_lb=dataset_config["ignore_idx"],
-        rootpth=dataset_config["dataset_path"],
-        cropsize=dataset_config["cropsize"],
-        mode="train",
-    )
-
-    print(f"Dataset loaded with {len(ds)} samples.")
-
-    uni = []
-    from tqdm import tqdm
-
-    for item in tqdm(ds, desc="Validating labels"):
+    for split in ("train", "val"):
+        ds = UAVid(
+            config_file=config_file,
+            ignore_lb=255,
+            rootpth=rootpth,
+            cropsize=(1024, 1024),
+            mode=split,
+            val_seqs=["seq16"],
+        )
+        print(f"{split}: {len(ds)} samples")
+        if len(ds) == 0:
+            continue
+        item = ds[0]
         for lb in item["label_patches"]:
-            lb_np = lb.numpy()
-            unique_labels = np.unique(lb_np[lb_np != ds.ignore_lb])  # Exclude ignore
-            uni.extend(unique_labels.tolist())
-
-    print("Unique training IDs found:", sorted(set(uni)))
+            unique = torch.unique(lb[lb != 255])
+            print(f"  unique trainIds in first item: {sorted(unique.tolist())}")
+        break

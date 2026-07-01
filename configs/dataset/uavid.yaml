@@ -1,19 +1,46 @@
-# Dataset Configuration
+# Dataset Configuration for CABiNet training on UAVid
+#
+# Dataset layout (as distributed by UAVid):
+#
+#   uavid_train/           ← dataset_path (set UAVID_TRAIN_ROOT env var)
+#   ├── seq1/
+#   │   ├── Images/        ← RGB input images  (*.png)
+#   │   └── Labels/        ← RGB colour-coded masks (*.png)
+#   ├── seq2/ … seq15/
+#   └── seq16/             ← validation sequences  (see val_seqs below)
+#
+# Labels are 3-channel RGB colour masks.  uavid.py converts them to
+# single-channel trainId masks on-the-fly using the UAVid_info.json palette.
+#
+# For YOLO training see configs/dataset/uavid_yolo.yaml and run the
+# conversion script first:
+#   python src/scripts/convert_uavid_to_yolo.py \
+#       --src $UAVID_TRAIN_ROOT --dst /data/uavid_yolo --val-seqs seq16
+
 name: uavid
-config_file: configs/UAVid_info.json # Relative path (project-root relative)
-num_classes: 8
+config_file: configs/UAVid_info.json # colour palette + class metadata
+num_classes: 8 # Clutter(0) … MovingCar(7); Clutter excluded from mIoU
 cropsize: [1024, 1024]
-dataset_path: ${env:DATA_ROOT:} # Env override + fallback
-ignore_idx: 255
+dataset_path: ${env:UAVID_TRAIN_ROOT:} # path to uavid_train/ (e.g. /data/uavid_train)
+ignore_idx: 255 # label for pixels with no known colour match
 seed: 0
-class_weights: [
-    1.60, # clutter
-    1.00, # building
-    2.26, # road
-    15.31, # static car
-    1.43, # tree
-    2.48, # vegetation
-    20.00, # human
-    18.89, # moving car
-  ]
-# Note: shuffle is handled in DataLoader, not here
+
+# Sequence names used as the validation split.
+# All other sequences found in dataset_path are used for training.
+# The augmented 600-image dataset adds extra sequences alongside the originals;
+# they are picked up automatically as long as they are not listed here.
+val_seqs:
+  - seq16
+
+# Per-class loss weights (inverse-frequency, applied as CrossEntropy weight).
+# Clutter (index 0) is upweighted slightly even though it is excluded from mIoU,
+# to prevent the model from treating it as a free "don't care" region.
+class_weights:
+  - 1.60 # 0: Clutter
+  - 1.00 # 1: Building
+  - 2.26 # 2: Road
+  - 15.31 # 3: Static Car
+  - 1.43 # 4: Tree
+  - 2.48 # 5: Vegetation
+  - 20.00 # 6: Human
+  - 18.89 # 7: Moving Car

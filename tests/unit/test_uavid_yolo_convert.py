@@ -3,8 +3,12 @@
 Covers:
   - build_colour_map: correct class IDs and ignore label for Clutter
   - build_lut: LUT entries match colour_map
+  - build_trainid_lut: Clutter→0 (CABiNet trainId), unknown→255
   - convert_mask: pixel-level correctness, clutter→255, unknown colour→255
   - get_yolo_class_names: ordering and count
+  - discover_sequences: finds sequence dirs with Images/ sub-dir
+  - iter_sequences: correct enumeration, error on missing seq
+  - convert_sequences: writes masks and symlinks for given sequences
   - Integration: round-trip (write → read back, values match)
 """
 
@@ -21,8 +25,12 @@ from src.scripts.convert_uavid_to_yolo import (
     IGNORE_LABEL,
     build_colour_map,
     build_lut,
+    build_trainid_lut,
     convert_mask,
+    convert_sequences,
+    discover_sequences,
     get_yolo_class_names,
+    iter_sequences,
     load_labels_info,
 )
 
@@ -339,3 +347,156 @@ class TestLoadLabelsInfo:
         clutter = next(c for c in info if c["name"] == "Clutter")
         assert clutter["ignoreInEval"] is True
         assert clutter["color"] == [0, 0, 0]
+
+
+# ---------------------------------------------------------------------------
+# build_trainid_lut tests  (CABiNet training — Clutter=0, not 255)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTrainidLut:
+    def test_clutter_maps_to_zero(self, labels_info):
+        """Clutter must keep its trainId=0 (included in loss, excluded in mIoU)."""
+        lut = build_trainid_lut(labels_info)
+        assert lut[0, 0, 0] == 0
+
+    def test_building_maps_to_trainid_one(self, labels_info):
+        lut = build_trainid_lut(labels_info)
+        assert lut[128, 0, 0] == 1
+
+    def test_moving_car_maps_to_trainid_seven(self, labels_info):
+        lut = build_trainid_lut(labels_info)
+        assert lut[64, 0, 128] == 7
+
+    def test_unknown_colour_maps_to_ignore(self, labels_info):
+        lut = build_trainid_lut(labels_info, ignore_lb=255)
+        assert lut[7, 8, 9] == 255
+
+    def test_different_from_yolo_lut(self, labels_info):
+        """Clutter entry must differ: trainId LUT has 0, YOLO LUT has 255."""
+        trainid_lut = build_trainid_lut(labels_info)
+        yolo_lut = build_lut(build_colour_map(labels_info))
+        assert trainid_lut[0, 0, 0] == 0  # Clutter → 0 in CABiNet
+        assert yolo_lut[0, 0, 0] == IGNORE_LABEL  # Clutter → 255 in YOLO
+
+
+# ---------------------------------------------------------------------------
+# discover_sequences / iter_sequences tests
+# ---------------------------------------------------------------------------
+
+
+def _make_uavid_tree(root: Path, seqs: list[str], n_images: int = 2) -> None:
+    """Create a minimal UAVid-style directory tree for testing."""
+    colours = {
+        "000001": (128, 0, 0),  # Building
+        "000002": (0, 0, 0),  # Clutter
+    }
+    for seq in seqs:
+        img_dir = root / seq / "Images"
+        label_dir = root / seq / "Labels"
+        img_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        for i, (stem, colour) in enumerate(list(colours.items())[:n_images]):
+            arr = np.full((4, 4, 3), colour, dtype=np.uint8)
+            Image.fromarray(arr).save(img_dir / f"{stem}.png")
+            Image.fromarray(arr).save(label_dir / f"{stem}.png")
+
+
+class TestDiscoverSequences:
+    def test_finds_seq_dirs_with_images(self, tmp_path):
+        _make_uavid_tree(tmp_path, ["seq1", "seq2", "seq16"])
+        found = discover_sequences(tmp_path)
+        assert found == ["seq1", "seq16", "seq2"]
+
+    def test_ignores_dirs_without_images(self, tmp_path):
+        """A directory without an Images/ sub-dir should not be returned."""
+        (tmp_path / "not_a_seq").mkdir()
+        _make_uavid_tree(tmp_path, ["seq1"])
+        found = discover_sequences(tmp_path)
+        assert "not_a_seq" not in found
+        assert "seq1" in found
+
+    def test_empty_root_returns_empty(self, tmp_path):
+        assert discover_sequences(tmp_path) == []
+
+
+class TestIterSequences:
+    def test_returns_correct_entries(self, tmp_path):
+        _make_uavid_tree(tmp_path, ["seq1", "seq2"], n_images=2)
+        entries = iter_sequences(tmp_path, ["seq1", "seq2"])
+        # Each seq has 2 images → 4 total
+        assert len(entries) == 4
+
+    def test_keys_unique_across_sequences(self, tmp_path):
+        """Same image filename in different sequences must not produce duplicate entries."""
+        _make_uavid_tree(tmp_path, ["seq1", "seq2"])  # both have 000001.png
+        entries = iter_sequences(tmp_path, ["seq1", "seq2"])
+        keys = [(seq, stem) for _, seq, stem in entries]
+        assert len(keys) == len(set(keys)), "Duplicate (seq, stem) pairs found"
+
+    def test_missing_sequence_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="seq99"):
+            iter_sequences(tmp_path, ["seq99"])
+
+    def test_respects_sequence_list_order(self, tmp_path):
+        _make_uavid_tree(tmp_path, ["seq1", "seq2", "seq16"])
+        entries = iter_sequences(tmp_path, ["seq16"])
+        seqs_seen = {seq for _, seq, _ in entries}
+        assert seqs_seen == {"seq16"}
+
+
+class TestConvertSequences:
+    def test_converts_masks_and_creates_images_dir(self, tmp_path, lut):
+        src = tmp_path / "uavid_train"
+        dst = tmp_path / "uavid_yolo"
+        _make_uavid_tree(src, ["seq1", "seq16"])
+        n = convert_sequences(
+            src_root=src,
+            dst_root=dst,
+            split="train",
+            seqs=["seq1"],
+            lut=lut,
+            workers=1,
+            dry_run=False,
+        )
+        assert n == 2  # two images in seq1
+        assert (dst / "masks" / "train").exists()
+        assert (dst / "images" / "train").exists()
+
+    def test_dry_run_writes_nothing(self, tmp_path, lut):
+        src = tmp_path / "uavid_train"
+        dst = tmp_path / "uavid_yolo"
+        _make_uavid_tree(src, ["seq1"])
+        n = convert_sequences(
+            src_root=src,
+            dst_root=dst,
+            split="train",
+            seqs=["seq1"],
+            lut=lut,
+            dry_run=True,
+        )
+        assert n == 2
+        assert not dst.exists()
+
+    def test_train_val_separation(self, tmp_path, lut):
+        """seq1 → train, seq16 → val; masks must not mix."""
+        src = tmp_path / "uavid_train"
+        dst = tmp_path / "uavid_yolo"
+        _make_uavid_tree(src, ["seq1", "seq16"])
+
+        convert_sequences(src, dst, "train", ["seq1"], lut)
+        convert_sequences(src, dst, "val", ["seq16"], lut)
+
+        train_masks = list((dst / "masks" / "train").glob("*.png"))
+        val_masks = list((dst / "masks" / "val").glob("*.png"))
+
+        assert all("seq1_" in m.name for m in train_masks)
+        assert all("seq16_" in m.name for m in val_masks)
+
+    def test_output_masks_are_single_channel(self, tmp_path, lut):
+        src = tmp_path / "uavid_train"
+        dst = tmp_path / "uavid_yolo"
+        _make_uavid_tree(src, ["seq1"])
+        convert_sequences(src, dst, "train", ["seq1"], lut)
+        for mask_path in (dst / "masks" / "train").glob("*.png"):
+            assert Image.open(mask_path).mode == "L"

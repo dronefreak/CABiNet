@@ -1,0 +1,31 @@
+# =============================================================================
+# Ultralytics YOLO — UAVid Validation / Benchmark Config
+# =============================================================================
+# Usage (after training):
+#   Single-scale:
+#     yolo segment val cfg=configs/yolo/uavid_val.yaml \
+#         model=runs/uavid/yolov8m/weights/best.pt
+#
+#   Test-time augmentation (TTA):
+#     yolo segment val cfg=configs/yolo/uavid_val.yaml \
+#         model=runs/uavid/yolov8m/weights/best.pt \
+#         augment=True
+# =============================================================================
+
+task: segment
+data: configs/dataset/uavid_yolo.yaml
+
+imgsz: 1024
+batch: 1 # 1 for sliding-window/full-resolution eval; raise if memory allows
+split: val
+device: 0
+workers: 4
+
+overlap_mask: False # must match training setting
+save_json: True # save per-image results for offline analysis
+plots: True # confusion matrix + class-level IoU bar chart
+verbose: True
+
+# Test-time augmentation (TTA) — mirrors multi-scale eval in CABiNet evaluate.py
+# Enable with: augment=True on CLI
+augment: False

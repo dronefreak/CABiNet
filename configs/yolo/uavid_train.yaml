@@ -1,0 +1,127 @@
+# =============================================================================
+# Ultralytics YOLO — UAVid Semantic Segmentation Training Config
+# =============================================================================
+# Usage:
+#   yolo segment train cfg=configs/yolo/uavid_train.yaml
+#
+# Resume an interrupted run:
+#   yolo segment train cfg=configs/yolo/uavid_train.yaml resume=True
+#
+# Multi-GPU (DDP):
+#   yolo segment train cfg=configs/yolo/uavid_train.yaml device=0,1,2,3
+#
+# Swap model variant (nano / small / large / xlarge):
+#   yolo segment train cfg=configs/yolo/uavid_train.yaml model=yolov8n-seg.pt name=yolov8n
+# =============================================================================
+
+# ── Task & Model ─────────────────────────────────────────────────────────────
+task:
+  segment # use 'segment' task; single-channel class-ID masks trigger
+  # semantic-style training when overlap_mask=False
+model: yolov8m-seg.pt # pretrained checkpoint (downloads automatically)
+data: configs/dataset/uavid_yolo.yaml
+
+# ── Output ───────────────────────────────────────────────────────────────────
+project: runs/uavid # results root
+name: yolov8m # run sub-dir; change per variant (yolov8n, yolov11m, …)
+exist_ok: False # set True to overwrite a previous run with the same name
+
+# ── Core training schedule ───────────────────────────────────────────────────
+epochs: 120 # total epochs (UAVid is small → more epochs help)
+patience: 30 # early stop after N epochs without val mIoU improvement
+imgsz: 1024 # UAVid patches are 1920×1080; 1024 fits in GPU memory
+batch: 4 # per-GPU batch size (adjust to your VRAM)
+seed: 0 # reproducibility
+
+# ── Gradient accumulation ─────────────────────────────────────────────────────
+# YOLO implements accumulation via the nominal batch size (nbs).
+# Effective accumulation steps = ceil(nbs / (batch * num_GPUs)).
+# With batch=4 and nbs=64: 64/4 = 16 micro-batches before each optimizer step.
+# Equivalent to training with an effective batch of 64 — same as CABiNet baseline.
+nbs: 64
+
+# ── Mixed precision (AMP) ────────────────────────────────────────────────────
+# Enables automatic mixed precision (FP16 forward + FP32 gradients).
+# YOLO's AMP implementation wraps torch.cuda.amp.autocast internally.
+# NOTE: EMA (Exponential Moving Average) is ALWAYS applied by default.
+#       'best.pt' and 'last.pt' both contain the EMA-averaged weights.
+#       There is no separate flag; EMA cannot be disabled via CLI.
+amp: True
+
+# ── Checkpointing ────────────────────────────────────────────────────────────
+save: True # always save best.pt and last.pt
+save_period:
+  10 # additionally save checkpoint_N.pt every N epochs
+  # protects against crashes; set -1 to save best/last only
+
+# ── Resume ───────────────────────────────────────────────────────────────────
+# Set resume=True (or pass on CLI) to continue from last.pt in the same run dir.
+# YOLO will pick up: epoch counter, optimizer state, EMA state, best metric.
+# The run directory is: {project}/{name}/weights/last.pt
+resume: False # override with resume=True on CLI to resume
+
+# ── Optimizer ────────────────────────────────────────────────────────────────
+optimizer: SGD # SGD with momentum (matches CABiNet; AdamW also works)
+lr0: 0.01 # initial learning rate
+lrf: 0.01 # final LR = lr0 * lrf (cosine/linear decay floor)
+momentum: 0.937 # SGD momentum
+weight_decay: 0.0005 # L2 regularisation (matches CABiNet weight decay)
+warmup_epochs: 3.0 # linear LR warmup; helps stability with large imgsz
+warmup_momentum: 0.8 # momentum during warmup
+warmup_bias_lr: 0.1 # bias LR during warmup (higher than main to stabilise BN)
+cos_lr: True # cosine annealing (smoother than step decay for seg)
+
+# ── Segmentation-specific ────────────────────────────────────────────────────
+# overlap_mask MUST be False for semantic segmentation.
+# When True, YOLO merges instance masks — meaningless for per-pixel class labels.
+overlap_mask: False
+mask_ratio: 1 # no downsampling of semantic masks (full resolution)
+
+# ── Class-imbalance handling ─────────────────────────────────────────────────
+# cls_pw applies inverse-frequency class weighting to the classification loss.
+# 0.0 = disabled (uniform), 1.0 = full inverse-frequency.
+# UAVid is heavily skewed (Human/Moving Car are rare); 0.5 is a good start.
+cls_pw: 0.5
+
+# ── Augmentation ─────────────────────────────────────────────────────────────
+# UAVid is aerial imagery — mosaic and copy-paste are useful, but strong
+# colour jitter may hurt (controlled imaging conditions).
+
+# Geometric
+degrees: 10.0 # rotation ±10° (matches CABiNet RandomRotate)
+translate: 0.05 # small translation (aerial scenes are large)
+scale: 0.3 # scale jitter ±30%
+shear: 0.0 # shear disabled (aerial imagery is mostly ortho)
+perspective: 0.0 # perspective disabled (orthographic UAV view)
+flipud: 0.2 # vertical flip (valid for top-down aerial view)
+fliplr: 0.5 # horizontal flip
+
+# Colour / photometric
+hsv_h: 0.01 # small hue shift (aerial imagery has consistent colours)
+hsv_s: 0.4 # saturation jitter
+hsv_v: 0.3 # value (brightness) jitter
+
+# Mosaic / mixup — useful for small objects (cars, humans) in aerial view
+mosaic: 0.8 # mosaic probability (set 0.0 to disable)
+mixup: 0.1 # MixUp blending probability
+copy_paste: 0.15 # copy-paste small objects (humans, moving cars)
+copy_paste_mode: flip # copy-paste strategy
+
+# Close mosaic N epochs before end to stabilise fine predictions
+close_mosaic: 15
+
+# ── Validation ───────────────────────────────────────────────────────────────
+val: True # run validation after every epoch
+split: val # validation split name
+
+# ── Compute / logging ────────────────────────────────────────────────────────
+device: 0 # GPU id(s); use 'cpu' for CPU-only, '0,1' for multi-GPU
+workers: 8 # dataloader workers per GPU
+plots: True # save training curves and confusion matrix
+verbose: True
+deterministic: True # fully reproducible (may be slower)
+
+# ── Multi-scale training (optional) ──────────────────────────────────────────
+# Trains with random image sizes in [imgsz*(1-multi_scale), imgsz*(1+multi_scale)].
+# Improves generalisation across zoom levels; costs ~10–15% more time.
+multi_scale: 0.0 # set 0.2 to enable
