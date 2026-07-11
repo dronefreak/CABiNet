@@ -1,0 +1,4 @@
+# YOLOv8 Medium — Segmentation  [default]
+# ~27.3M parameters | ~110.2 GFLOPs
+model_name: yolov8m-seg.pt
+run_name: yolov8m

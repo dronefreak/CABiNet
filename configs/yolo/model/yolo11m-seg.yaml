@@ -1,0 +1,4 @@
+# YOLO11 Medium — Segmentation
+# ~22.4M parameters | ~123.0 GFLOPs
+model_name: yolo11m-seg.pt
+run_name: yolo11m

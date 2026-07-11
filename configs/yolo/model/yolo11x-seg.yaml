@@ -1,0 +1,5 @@
+# YOLO11 Extra-large — Segmentation
+# ~62.1M parameters | ~344.3 GFLOPs
+# Highest accuracy YOLO11 variant
+model_name: yolo11x-seg.pt
+run_name: yolo11x

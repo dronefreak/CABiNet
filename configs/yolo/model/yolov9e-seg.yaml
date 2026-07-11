@@ -1,0 +1,5 @@
+# YOLOv9 Extended — Segmentation
+# ~57.6M parameters | ~319.4 GFLOPs
+# Largest YOLOv9 variant; highest accuracy in the v9 family
+model_name: yolov9e-seg.pt
+run_name: yolov9e

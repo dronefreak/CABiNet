@@ -1,0 +1,5 @@
+# YOLO11 Nano — Segmentation
+# ~2.9M parameters | ~10.4 GFLOPs
+# Most efficient YOLO11 variant
+model_name: yolo11n-seg.pt
+run_name: yolo11n

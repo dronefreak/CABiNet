@@ -1,0 +1,4 @@
+# YOLO11 Large — Segmentation
+# ~27.6M parameters | ~142.2 GFLOPs
+model_name: yolo11l-seg.pt
+run_name: yolo11l
