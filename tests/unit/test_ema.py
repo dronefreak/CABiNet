@@ -100,9 +100,9 @@ class TestModelEMAUpdate:
         ema = ModelEMA(model)
         model.counter.fill_(5)
         ema.update(model)
-        assert (
-            ema.ema.counter.item() == 0
-        ), "Non-float buffers must be left untouched by the EMA update"
+        assert ema.ema.counter.item() == 0, (
+            "Non-float buffers must be left untouched by the EMA update"
+        )
 
 
 class TestModelEMAStateDict:

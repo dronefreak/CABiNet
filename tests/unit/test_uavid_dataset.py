@@ -358,9 +358,9 @@ class TestMixUp:
         )
         _, label = ds[0]
         unique = set(label.unique().tolist())
-        assert unique.issubset(
-            {1, 5}
-        ), f"Blended label must be a hard copy of one source label, got {unique}"
+        assert unique.issubset({1, 5}), (
+            f"Blended label must be a hard copy of one source label, got {unique}"
+        )
 
     def test_mixup_never_crashes_on_single_sample_dataset(self, tmp_path):
         """With only one sample, the mixup 'partner' is the same sample —

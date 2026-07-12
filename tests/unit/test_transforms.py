@@ -252,9 +252,9 @@ class TestRandomRotate:
         lb_np = np.array(result["lb"])
         # All pixels should be either class 5 (original) or 255 (border)
         unique_vals = set(np.unique(lb_np).tolist())
-        assert unique_vals.issubset(
-            {5, ignore_label}
-        ), f"Unexpected label values after rotation: {unique_vals - {5, ignore_label}}"
+        assert unique_vals.issubset({5, ignore_label}), (
+            f"Unexpected label values after rotation: {unique_vals - {5, ignore_label}}"
+        )
 
     def test_rotate_image_label_same_size(self):
         """Image and label must remain the same spatial size after rotation."""
@@ -264,9 +264,9 @@ class TestRandomRotate:
         transform = RandomRotate(degrees=(20, 20), ignore_label=255)
         result = transform({"im": img, "lb": lb})
 
-        assert (
-            result["im"].size == result["lb"].size
-        ), "Image and label must have same size after rotation"
+        assert result["im"].size == result["lb"].size, (
+            "Image and label must have same size after rotation"
+        )
 
 
 class TestRandomScaleContinuous:

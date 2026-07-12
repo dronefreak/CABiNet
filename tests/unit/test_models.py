@@ -126,16 +126,16 @@ class TestCABiNetModel:
         model = mock_small_model(num_classes=19, mode="small")
         result = model.get_params()
 
-        assert (
-            len(result) == 4
-        ), "get_params() must return 4 groups: wd, nowd, lr_mul_wd, lr_mul_nowd"
+        assert len(result) == 4, (
+            "get_params() must return 4 groups: wd, nowd, lr_mul_wd, lr_mul_nowd"
+        )
         wd_params, nowd_params, lr_mul_wd, lr_mul_nowd = result
 
         # All groups must be non-empty
         assert len(wd_params) > 0, "wd_params (backbone/sb weights) must be non-empty"
-        assert (
-            len(nowd_params) > 0
-        ), "nowd_params (backbone/sb biases/BN) must be non-empty"
+        assert len(nowd_params) > 0, (
+            "nowd_params (backbone/sb biases/BN) must be non-empty"
+        )
         assert len(lr_mul_wd) > 0, "lr_mul_wd (decoder weights) must be non-empty"
         assert len(lr_mul_nowd) > 0, "lr_mul_nowd (decoder biases/BN) must be non-empty"
 
@@ -144,9 +144,9 @@ class TestCABiNetModel:
         for name, child in model.named_children():
             if name in ("ab", "ffm", "conv_out"):
                 for p in child.parameters():
-                    assert (
-                        id(p) in all_decoder_params
-                    ), f"Parameter from decoder module '{name}' missing from lr_mul groups"
+                    assert id(p) in all_decoder_params, (
+                        f"Parameter from decoder module '{name}' missing from lr_mul groups"
+                    )
 
     def test_cabinet_get_params_no_overlap(self, mock_small_model):
         """Test that no parameter appears in both backbone and decoder groups."""
@@ -156,9 +156,9 @@ class TestCABiNetModel:
         backbone_ids = set(id(p) for p in wd_params + nowd_params)
         decoder_ids = set(id(p) for p in lr_mul_wd + lr_mul_nowd)
         overlap = backbone_ids & decoder_ids
-        assert (
-            len(overlap) == 0
-        ), f"{len(overlap)} parameters appear in both backbone and decoder groups"
+        assert len(overlap) == 0, (
+            f"{len(overlap)} parameters appear in both backbone and decoder groups"
+        )
 
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
     def test_cabinet_cuda(self, num_classes, mock_large_model):

@@ -205,9 +205,9 @@ class TestGradientAccumulation:
         # Gradients should match (not necessarily exact due to OHEM sampling, but shapes)
         assert set(grad_full.keys()) == set(grad_accum.keys()), "Parameter sets differ"
         for name in grad_full:
-            assert (
-                grad_full[name].shape == grad_accum[name].shape
-            ), f"Shape mismatch for {name}"
+            assert grad_full[name].shape == grad_accum[name].shape, (
+                f"Shape mismatch for {name}"
+            )
             # Norms should be in the same ballpark (within 2x) — exact match not guaranteed due to OHEM
             norm_full = grad_full[name].norm().item()
             norm_accum = grad_accum[name].norm().item()
@@ -299,15 +299,15 @@ class TestSlidingWindowEvaluation:
 
         # After softmax, class 0 should dominate everywhere
         pred = prob.argmax(dim=1)  # (1, 100, 100)
-        assert (
-            pred == 0
-        ).all(), "Uniform constant model should predict class 0 everywhere"
+        assert (pred == 0).all(), (
+            "Uniform constant model should predict class 0 everywhere"
+        )
 
         # Prob values for class 0 should be uniform across spatial locations
         class0_prob = prob[0, 0, :, :]
-        assert (
-            class0_prob.max() - class0_prob.min() < 1e-5
-        ), "Class 0 probability varies across spatial locations — overlap normalization may be wrong."
+        assert class0_prob.max() - class0_prob.min() < 1e-5, (
+            "Class 0 probability varies across spatial locations — overlap normalization may be wrong."
+        )
 
     def test_sliding_window_no_bias_at_edges(self):
         """Edge pixels (covered by fewer crops) must not have systematically different predictions
@@ -634,9 +634,9 @@ class TestCheckpointRoundTrip:
             stopper2 = EarlyStopping(patience=10)
             _load_checkpoint(ckpt, model2, optim2, scaler2, ema2, stopper2, device)
 
-        assert (
-            optim2.it == 42
-        ), f"Optimizer step counter not restored: expected 42, got {optim2.it}"
+        assert optim2.it == 42, (
+            f"Optimizer step counter not restored: expected 42, got {optim2.it}"
+        )
 
     def test_checkpoint_restores_ema_and_early_stop_state(
         self, mock_small_model, num_classes
@@ -697,9 +697,9 @@ class TestCheckpointRoundTrip:
             not torch.allclose(p_ema, p_raw)
             for p_ema, p_raw in zip(ema2.ema.parameters(), model2.parameters())
         )
-        assert (
-            any_diff
-        ), "EMA weights are identical to raw model — EMA state not restored"
+        assert any_diff, (
+            "EMA weights are identical to raw model — EMA state not restored"
+        )
 
         assert stopper2.best_fitness == pytest.approx(0.8)
         assert stopper2.best_epoch == 7
@@ -731,9 +731,9 @@ class TestGradientClipping:
                 if p.grad is not None
             )
         )
-        assert (
-            total_norm <= max_norm + 1e-4
-        ), f"Gradient norm {total_norm:.4f} exceeds max_norm {max_norm} after clipping"
+        assert total_norm <= max_norm + 1e-4, (
+            f"Gradient norm {total_norm:.4f} exceeds max_norm {max_norm} after clipping"
+        )
 
     def test_clipping_does_not_zero_gradients(self, mock_small_model, num_classes):
         """Gradient clipping must not zero out all gradients — only scale them down."""

@@ -236,9 +236,9 @@ class TestConvertMask:
         img.save(src)
         convert_mask(src, dst, lut)
         result = np.array(Image.open(dst))
-        assert (
-            result == 1
-        ).all(), f"Expected all 1, got unique values: {np.unique(result)}"
+        assert (result == 1).all(), (
+            f"Expected all 1, got unique values: {np.unique(result)}"
+        )
 
     def test_clutter_pixels_become_zero(self, lut, tmp_path):
         """Clutter is a valid class (id 0), never the ignore label."""
