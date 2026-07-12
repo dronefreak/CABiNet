@@ -1,0 +1,4 @@
+# YOLO11 Small — Segmentation
+# ~10.1M parameters | ~35.5 GFLOPs
+model_name: yolo11s-seg.pt
+run_name: yolo11s

@@ -1,0 +1,4 @@
+# YOLO26 Nano — Semantic Segmentation  [default]
+# ~2.6M parameters | ~6.1 GFLOPs
+model_name: yolo26n-sem.pt
+run_name: yolo26n

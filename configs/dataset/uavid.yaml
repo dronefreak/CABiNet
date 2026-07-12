@@ -1,19 +1,58 @@
-# Dataset Configuration
+# Dataset Configuration for CABiNet training on UAVid
+#
+# dataset_path must point at the PRE-CONVERTED dataset produced by
+# src/scripts/convert_uavid_to_yolo.py — the SAME converted directory used by
+# the YOLO26 semantic-segmentation pipeline (configs/dataset/uavid_yolo.yaml):
+#
+#   <dataset_path>/
+#   ├── images/{train,val,test}/   ← RGB PNGs
+#   └── masks/{train,val,test}/    ← single-channel PNGs, pixel value = class ID
+#
+# This is NOT the raw UAVid distribution (uavid_train/ with seqN/Images,
+# Labels/) — convert it first:
+#   python src/scripts/convert_uavid_to_yolo.py \
+#       --src /path/to/raw/uavid --dst /path/to/converted --info configs/UAVid_info.json
+#
+# All 8 classes (Clutter included) are valid trainIds 0-7 — see
+# convert_uavid_to_yolo.py's docstring. No colour palette or lookup table is
+# needed at load time; the conversion step already produced final class IDs.
+#
+# NOTE: UAVid source images are not uniform resolution (3840x2160 and
+# 4096x2160 both occur), and val/test mode applies no crop — train.py
+# enforces validation_config.batch_size=1 for this dataset (raises
+# ConfigurationError otherwise). Pass it explicitly on the CLI, e.g.:
+#   python src/scripts/train.py dataset=uavid validation_config.batch_size=1
+
 name: uavid
-config_file: configs/UAVid_info.json # Relative path (project-root relative)
-num_classes: 8
+num_classes: 8 # Clutter(0) … MovingCar(7); all 8 classes valid, none ignored
 cropsize: [1024, 1024]
-dataset_path: ${env:DATA_ROOT:} # Env override + fallback
-ignore_idx: 255
+dataset_path: ${oc.env:UAVID_YOLO_ROOT,''} # path to the CONVERTED dataset root
+ignore_idx: 255 # label for pixels with no known colour match (see conversion script)
 seed: 0
-class_weights: [
-    1.60, # clutter
-    1.00, # building
-    2.26, # road
-    15.31, # static car
-    1.43, # tree
-    2.48, # vegetation
-    20.00, # human
-    18.89, # moving car
-  ]
-# Note: shuffle is handled in DataLoader, not here
+
+# Class weights are no longer a static per-dataset table — they're computed
+# at training startup from a sample of the training set via
+# training_config.cls_pw (see configs/train.yaml). This keeps weights
+# accurate if the underlying dataset changes, and matches the YOLO26
+# pipeline's cls_pw mechanism exactly.
+
+# Training augmentation — mirrors configs/train_yolo.yaml's augmentation:
+# block as closely as CABiNet's single-image transform pipeline allows.
+# shear/perspective are omitted (disabled on both sides already, so they
+# already "match" by absence). mosaic/copy_paste are NOT implemented — both
+# are multi-image augmentations needing dataset-level access to other
+# samples; copy_paste additionally has no well-defined meaning for pure
+# semantic segmentation (no instance boundaries to paste). mixup IS
+# implemented (see src/datasets/uavid.py's docstring for the one necessary
+# simplification: images blend continuously, but the hard label can't
+# blend the same way, so it's taken from whichever image contributed more).
+augmentation:
+  degrees: 10.0 # rotation ±10° (matches RandomRotate)
+  translate: 0.05 # small translation, fraction of image size
+  scale: 0.3 # scale jitter ±30% (continuous)
+  flipud: 0.2 # vertical flip — valid for top-down aerial view
+  fliplr: 0.5 # horizontal flip
+  hsv_h: 0.01 # small hue shift (controlled imaging conditions)
+  hsv_s: 0.4 # saturation jitter
+  hsv_v: 0.3 # brightness/value jitter
+  mixup: 0.1 # probability of blending with a second random sample

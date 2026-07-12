@@ -1,0 +1,5 @@
+# YOLOv8 Nano — Segmentation
+# ~3.4M parameters | ~12.6 GFLOPs
+# Fastest inference; lowest accuracy
+model_name: yolov8n-seg.pt
+run_name: yolov8n

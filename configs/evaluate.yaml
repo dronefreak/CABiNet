@@ -1,0 +1,40 @@
+# evaluate.yaml
+# Hydra config for standalone CABiNet checkpoint evaluation (src/scripts/evaluate.py)
+#
+# Usage:
+#   python src/scripts/evaluate.py checkpoint_path=experiments/.../model_best.pth
+#   python src/scripts/evaluate.py checkpoint_path=... dataset=uavid validation_config.batch_size=1
+#   python src/scripts/evaluate.py checkpoint_path=... split=test
+#
+# Fast single-scale eval (no flip, no multi-scale):
+#   python src/scripts/evaluate.py checkpoint_path=... \
+#       validation_config.eval_scales=[1.0] validation_config.flip=false
+#
+# checkpoint_path accepts either a raw model state_dict (*_best.pth or the
+# final saved .pth) or a full training checkpoint (checkpoint_last.pth) —
+# the model_state key is extracted automatically from the latter.
+
+defaults:
+  - _self_
+  - model: mobilenetv3_large
+  - dataset: cityscapes
+
+# Required — no default on purpose (Hydra raises MissingMandatoryValue if unset).
+checkpoint_path: ???
+
+# Which split to evaluate. 'train' is intentionally unsupported: the dataset
+# classes apply training augmentation (RandomCrop, flips, colour jitter, ...)
+# whenever mode='train', which would corrupt evaluation metrics.
+split: val
+
+validation_config:
+  batch_size: 2
+  num_workers: 8
+  eval_scales: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75]
+  flip: true
+
+device: cuda # 'cuda' or 'cpu'; falls back to cpu with a warning if cuda is unavailable
+
+hydra:
+  run:
+    dir: outputs/evaluate/${now:%Y-%m-%d_%H-%M-%S}

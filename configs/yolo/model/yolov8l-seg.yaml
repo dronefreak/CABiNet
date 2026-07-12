@@ -1,0 +1,4 @@
+# YOLOv8 Large — Segmentation
+# ~46.0M parameters | ~220.5 GFLOPs
+model_name: yolov8l-seg.pt
+run_name: yolov8l

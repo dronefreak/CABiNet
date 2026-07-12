@@ -86,7 +86,7 @@ def mock_config():
             "optimizer_lr_start": 1e-3,
             "optimizer_momentum": 0.9,
             "optimizer_weight_decay": 5e-4,
-            "class_balancing": False,
+            "cls_pw": 0.0,
         },
     }
 

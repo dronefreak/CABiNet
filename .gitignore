@@ -201,3 +201,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated HF model cards — build output of hf_modelcards/generate_hf_model_zoo.py;
+# source of truth is hf_modelcards/template/ + hf_modelcards/model_metrics/
+hf_modelcards/generated/

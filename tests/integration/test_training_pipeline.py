@@ -11,6 +11,8 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.scripts.evaluate import MscEvalV0
 from src.scripts.train import _load_checkpoint, _save_checkpoint
+from src.utils.early_stopping import EarlyStopping
+from src.utils.ema import ModelEMA
 from src.utils.loss import OhemCELoss
 from src.utils.optimizer import Optimizer
 
@@ -203,9 +205,9 @@ class TestGradientAccumulation:
         # Gradients should match (not necessarily exact due to OHEM sampling, but shapes)
         assert set(grad_full.keys()) == set(grad_accum.keys()), "Parameter sets differ"
         for name in grad_full:
-            assert (
-                grad_full[name].shape == grad_accum[name].shape
-            ), f"Shape mismatch for {name}"
+            assert grad_full[name].shape == grad_accum[name].shape, (
+                f"Shape mismatch for {name}"
+            )
             # Norms should be in the same ballpark (within 2x) — exact match not guaranteed due to OHEM
             norm_full = grad_full[name].norm().item()
             norm_accum = grad_accum[name].norm().item()
@@ -246,7 +248,7 @@ class TestGradientAccumulation:
         # Each micro-step should add gradients — norm must be monotonically non-decreasing
         for i in range(1, len(norms)):
             assert norms[i] >= norms[i - 1] * 0.5, (
-                f"Gradient norm decreased from step {i-1} ({norms[i-1]:.4f}) "
+                f"Gradient norm decreased from step {i - 1} ({norms[i - 1]:.4f}) "
                 f"to step {i} ({norms[i]:.4f}), suggesting zero_grad was called mid-accumulation."
             )
 
@@ -297,15 +299,15 @@ class TestSlidingWindowEvaluation:
 
         # After softmax, class 0 should dominate everywhere
         pred = prob.argmax(dim=1)  # (1, 100, 100)
-        assert (
-            pred == 0
-        ).all(), "Uniform constant model should predict class 0 everywhere"
+        assert (pred == 0).all(), (
+            "Uniform constant model should predict class 0 everywhere"
+        )
 
         # Prob values for class 0 should be uniform across spatial locations
         class0_prob = prob[0, 0, :, :]
-        assert (
-            class0_prob.max() - class0_prob.min() < 1e-5
-        ), "Class 0 probability varies across spatial locations — overlap normalization may be wrong."
+        assert class0_prob.max() - class0_prob.min() < 1e-5, (
+            "Class 0 probability varies across spatial locations — overlap normalization may be wrong."
+        )
 
     def test_sliding_window_no_bias_at_edges(self):
         """Edge pixels (covered by fewer crops) must not have systematically different predictions
@@ -464,6 +466,56 @@ class TestDroppedLastMicroBatch:
 class TestCheckpointRoundTrip:
     """Tests for checkpoint save/load (_save_checkpoint / _load_checkpoint)."""
 
+    def test_numpy_float64_best_miou_round_trips_with_weights_only(
+        self, mock_small_model, num_classes
+    ):
+        """Regression test: MscEvalV0 returns numpy.float64 (np.nanmean), and
+        torch.save of a numpy scalar cannot be loaded back with
+        weights_only=True (the mode _load_checkpoint actually uses) — it
+        raises 'Unsupported global: numpy...scalar'. _save_checkpoint must
+        defensively cast to plain Python floats regardless of what the
+        caller passes in."""
+        import numpy as np
+
+        model = mock_small_model(num_classes=num_classes)
+        optim = self._make_optimizer(model)
+        scaler = torch.amp.GradScaler(device="cpu", enabled=False)
+        ema = ModelEMA(model)
+        stopper = EarlyStopping(patience=10)
+        stopper.best_fitness = np.float64(0.5)  # simulate un-cast fitness
+        device = torch.device("cpu")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt = Path(tmpdir) / "ckpt.pth"
+            _save_checkpoint(
+                ckpt,
+                epoch=0,
+                net=model,
+                optim=optim,
+                scaler=scaler,
+                ema=ema,
+                stopper=stopper,
+                best_miou=np.float64(0.1234),
+                best_loss=np.float64(0.5),
+            )
+
+            model2 = mock_small_model(num_classes=num_classes)
+            optim2 = self._make_optimizer(model2)
+            scaler2 = torch.amp.GradScaler(device="cpu", enabled=False)
+            ema2 = ModelEMA(model2)
+            stopper2 = EarlyStopping(patience=10)
+            # This must not raise (this is what weights_only=True rejects
+            # for numpy scalars); a plain torch.load below then confirms
+            # the values themselves survived correctly.
+            _, best_miou, best_loss = _load_checkpoint(
+                ckpt, model2, optim2, scaler2, ema2, stopper2, device
+            )
+
+        assert isinstance(best_miou, float)
+        assert best_miou == pytest.approx(0.1234)
+        assert isinstance(best_loss, float)
+        assert isinstance(stopper2.best_fitness, float)
+
     def _make_optimizer(self, model):
         return Optimizer(
             model=model,
@@ -479,6 +531,8 @@ class TestCheckpointRoundTrip:
         model = mock_small_model(num_classes=num_classes)
         optim = self._make_optimizer(model)
         scaler = torch.amp.GradScaler(device="cpu", enabled=False)
+        ema = ModelEMA(model)
+        stopper = EarlyStopping(patience=10)
         device = torch.device("cpu")
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -489,6 +543,8 @@ class TestCheckpointRoundTrip:
                 net=model,
                 optim=optim,
                 scaler=scaler,
+                ema=ema,
+                stopper=stopper,
                 best_miou=0.42,
                 best_loss=0.9,
             )
@@ -496,9 +552,11 @@ class TestCheckpointRoundTrip:
             model2 = mock_small_model(num_classes=num_classes)
             optim2 = self._make_optimizer(model2)
             scaler2 = torch.amp.GradScaler(device="cpu", enabled=False)
+            ema2 = ModelEMA(model2)
+            stopper2 = EarlyStopping(patience=10)
 
             start_epoch, best_miou, best_loss = _load_checkpoint(
-                ckpt, model2, optim2, scaler2, device
+                ckpt, model2, optim2, scaler2, ema2, stopper2, device
             )
 
         assert start_epoch == 8, "start_epoch must be saved_epoch + 1"
@@ -515,6 +573,8 @@ class TestCheckpointRoundTrip:
 
         optim = self._make_optimizer(model)
         scaler = torch.amp.GradScaler(device="cpu", enabled=False)
+        ema = ModelEMA(model)
+        stopper = EarlyStopping(patience=10)
         device = torch.device("cpu")
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -525,6 +585,8 @@ class TestCheckpointRoundTrip:
                 net=model,
                 optim=optim,
                 scaler=scaler,
+                ema=ema,
+                stopper=stopper,
                 best_miou=0.0,
                 best_loss=float("inf"),
             )
@@ -532,7 +594,9 @@ class TestCheckpointRoundTrip:
             model2 = mock_small_model(num_classes=num_classes)
             optim2 = self._make_optimizer(model2)
             scaler2 = torch.amp.GradScaler(device="cpu", enabled=False)
-            _load_checkpoint(ckpt, model2, optim2, scaler2, device)
+            ema2 = ModelEMA(model2)
+            stopper2 = EarlyStopping(patience=10)
+            _load_checkpoint(ckpt, model2, optim2, scaler2, ema2, stopper2, device)
 
         for (n1, p1), (n2, p2) in zip(
             model.named_parameters(), model2.named_parameters()
@@ -545,6 +609,8 @@ class TestCheckpointRoundTrip:
         optim = self._make_optimizer(model)
         optim.it = 42  # Simulate 42 optimizer steps completed
         scaler = torch.amp.GradScaler(device="cpu", enabled=False)
+        ema = ModelEMA(model)
+        stopper = EarlyStopping(patience=10)
         device = torch.device("cpu")
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -555,6 +621,8 @@ class TestCheckpointRoundTrip:
                 net=model,
                 optim=optim,
                 scaler=scaler,
+                ema=ema,
+                stopper=stopper,
                 best_miou=0.0,
                 best_loss=float("inf"),
             )
@@ -562,11 +630,79 @@ class TestCheckpointRoundTrip:
             model2 = mock_small_model(num_classes=num_classes)
             optim2 = self._make_optimizer(model2)
             scaler2 = torch.amp.GradScaler(device="cpu", enabled=False)
-            _load_checkpoint(ckpt, model2, optim2, scaler2, device)
+            ema2 = ModelEMA(model2)
+            stopper2 = EarlyStopping(patience=10)
+            _load_checkpoint(ckpt, model2, optim2, scaler2, ema2, stopper2, device)
 
-        assert (
-            optim2.it == 42
-        ), f"Optimizer step counter not restored: expected 42, got {optim2.it}"
+        assert optim2.it == 42, (
+            f"Optimizer step counter not restored: expected 42, got {optim2.it}"
+        )
+
+    def test_checkpoint_restores_ema_and_early_stop_state(
+        self, mock_small_model, num_classes
+    ):
+        """EMA weights (distinct from raw model weights) and early-stopping
+        state must both survive a save/load round-trip — this is the
+        regression guard that a resume doesn't silently reset EMA back to
+        the raw model or reset the early-stopping patience clock."""
+        model = mock_small_model(num_classes=num_classes)
+        optim = self._make_optimizer(model)
+        scaler = torch.amp.GradScaler(device="cpu", enabled=False)
+        ema = ModelEMA(model, decay=0.9, tau=1)
+        stopper = EarlyStopping(patience=10)
+        device = torch.device("cpu")
+
+        # Diverge EMA from the raw model with a few updates against perturbed weights.
+        for _ in range(5):
+            with torch.no_grad():
+                for p in model.parameters():
+                    p.add_(torch.randn_like(p) * 0.1)
+            ema.update(model)
+        assert ema.updates == 5
+
+        # Advance early-stopping state.
+        stopper(epoch=3, fitness=0.5)
+        stopper(epoch=7, fitness=0.8)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt = Path(tmpdir) / "ckpt.pth"
+            _save_checkpoint(
+                ckpt,
+                epoch=7,
+                net=model,
+                optim=optim,
+                scaler=scaler,
+                ema=ema,
+                stopper=stopper,
+                best_miou=0.8,
+                best_loss=0.1,
+            )
+
+            model2 = mock_small_model(num_classes=num_classes)
+            optim2 = self._make_optimizer(model2)
+            scaler2 = torch.amp.GradScaler(device="cpu", enabled=False)
+            ema2 = ModelEMA(model2, decay=0.9, tau=1)
+            stopper2 = EarlyStopping(patience=10)
+            _load_checkpoint(ckpt, model2, optim2, scaler2, ema2, stopper2, device)
+
+        assert ema2.updates == 5
+        for (n1, p1), (n2, p2) in zip(
+            ema.ema.named_parameters(), ema2.ema.named_parameters()
+        ):
+            assert torch.allclose(p1, p2), f"EMA weight mismatch after round-trip: {n1}"
+        # The loaded EMA weights must NOT equal the raw (non-EMA) model weights
+        # — proving the round-trip actually restored the averaged weights,
+        # not just re-copied the live model.
+        any_diff = any(
+            not torch.allclose(p_ema, p_raw)
+            for p_ema, p_raw in zip(ema2.ema.parameters(), model2.parameters())
+        )
+        assert any_diff, (
+            "EMA weights are identical to raw model — EMA state not restored"
+        )
+
+        assert stopper2.best_fitness == pytest.approx(0.8)
+        assert stopper2.best_epoch == 7
 
 
 class TestGradientClipping:
@@ -595,9 +731,9 @@ class TestGradientClipping:
                 if p.grad is not None
             )
         )
-        assert (
-            total_norm <= max_norm + 1e-4
-        ), f"Gradient norm {total_norm:.4f} exceeds max_norm {max_norm} after clipping"
+        assert total_norm <= max_norm + 1e-4, (
+            f"Gradient norm {total_norm:.4f} exceeds max_norm {max_norm} after clipping"
+        )
 
     def test_clipping_does_not_zero_gradients(self, mock_small_model, num_classes):
         """Gradient clipping must not zero out all gradients — only scale them down."""

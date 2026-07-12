@@ -1,9 +1,10 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
-import json
 import os
 import os.path as osp
+from typing import Any, Dict, Optional, Tuple
+import warnings
 
 from PIL import Image
 import numpy as np
@@ -18,234 +19,281 @@ from src.datasets.transform import (
     RandomCutout,
     RandomGamma,
     RandomHorizontalFlip,
+    RandomHSV,
     RandomNoise,
     RandomRotate,
     RandomScale,
+    RandomTranslate,
+    RandomVerticalFlip,
 )
 
-
-def uavid_collate_fn(batch):
-    """Collate function for UAVid that flattens patch lists into batch dimension.
-
-    Each item in batch has 4 patches → output batch size = 4 * N
-    """
-    all_imgs = []
-    all_labels = []
-    names = []
-
-    for item in batch:
-        # item: dict with 'img_patches', 'label_patches', 'name'
-        all_imgs.extend(item["img_patches"])  # List of 4 tensors
-        all_labels.extend(item["label_patches"])
-        names.extend([item["name"]] * 4)  # Track source
-
-    # Stack into single batch tensors
-    batched_imgs = torch.stack(all_imgs, dim=0)  # (4*N, 3, 1080, 1920)
-    batched_labels = torch.stack(all_labels, dim=0)  # (4*N, 1080, 1920)
-
-    return batched_imgs, batched_labels
+# Mirrors configs/yolo/uavid_train.yaml / configs/train_yolo.yaml's
+# augmentation block — CABiNet and the YOLO26 pipeline respond to the same
+# knobs with (as close as architecturally possible) the same meaning.
+# shear/perspective are omitted: both are disabled (0.0) on the YOLO side
+# and CABiNet has no such transforms, so they already "match" by absence.
+# mosaic/copy_paste are NOT implemented (see class docstring).
+DEFAULT_AUGMENTATION: Dict[str, float] = {
+    "degrees": 10.0,
+    "translate": 0.05,
+    "scale": 0.3,
+    "flipud": 0.2,
+    "fliplr": 0.5,
+    "hsv_h": 0.01,
+    "hsv_s": 0.4,
+    "hsv_v": 0.3,
+    "mixup": 0.1,
+}
 
 
 class UAVid(Dataset):
-    def __init__(self, config_file, ignore_lb, rootpth, cropsize, mode="train"):
-        super(UAVid, self).__init__()
+    """UAVid aerial semantic segmentation dataset.
+
+    Consumes the pre-converted, YOLO-style dataset layout produced by
+    ``src/scripts/convert_uavid_to_yolo.py`` — the SAME converted directory
+    used by the Ultralytics YOLO26 semantic-segmentation pipeline::
+
+        <rootpth>/
+        ├── images/
+        │   ├── train/   ← RGB PNGs
+        │   ├── val/
+        │   └── test/
+        └── masks/
+            ├── train/   ← single-channel PNGs, pixel value = class ID
+            ├── val/
+            └── test/
+
+    Mask pixel values are already final trainIds (0-7; Clutter=0 … MovingCar=7,
+    per the original UAVid paper all 8 classes are valid and none are
+    ignored) — no RGB colour palette or lookup table is needed here, since
+    the conversion step already did that once, up front. Pixel value 255 is
+    reserved for genuinely unrecognized colours encountered during
+    conversion (corrupted/anti-aliased source data), not a real class.
+
+    Parameters
+    ----------
+    ignore_lb:
+        Label value treated as "ignore" by the loss/metric (255).
+    rootpth:
+        Root of the *converted* dataset (i.e. ``convert_uavid_to_yolo.py``'s
+        ``--dst``) — NOT the raw UAVid distribution.
+    cropsize:
+        ``(H, W)`` crop applied during training augmentation via
+        ``RandomCrop``. UAVid source images are not uniform resolution
+        (both 3840x2160 and 4096x2160 occur in practice), so training relies
+        on ``RandomCrop(pad_if_needed=True)`` to handle arbitrary input size
+        directly rather than forcing a canonical resolution up front.
+    mode:
+        ``"train"``, ``"val"``, or ``"test"``.
+    augmentation:
+        Optional dict overriding any subset of ``DEFAULT_AUGMENTATION``
+        (degrees/translate/scale/flipud/fliplr/hsv_h/hsv_s/hsv_v/mixup),
+        mirroring the YOLO26 pipeline's ``augmentation:`` config block
+        (``configs/train_yolo.yaml``) so both pipelines can be tuned the
+        same way. ``mosaic``/``copy_paste`` are intentionally not
+        supported: both are multi-image augmentations requiring dataset-
+        level access to other samples, and ``copy_paste`` in particular has
+        no well-defined translation to pure semantic segmentation (no
+        instance boundaries to paste). ``mixup`` *is* implemented, but with
+        a necessary simplification: two images are alpha-blended
+        continuously (``Beta(32, 32)``, matching Ultralytics exactly), but
+        the two label maps cannot be blended the same way — there's no
+        meaningful "average" of two class-ID masks — so the hard label is
+        taken from whichever image contributed the larger blend weight.
+
+    Note on validation batching
+    ----------------------------
+    In ``val``/``test`` mode no crop is applied (full-resolution images are
+    evaluated via sliding-window inference), so a `DataLoader` batching more
+    than one sample at a time will fail to stack mismatched image sizes.
+    Callers must use ``batch_size=1`` for non-train modes.
+    """
+
+    def __init__(
+        self,
+        ignore_lb: int,
+        rootpth: str,
+        cropsize: Tuple[int, int],
+        mode: str = "train",
+        augmentation: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__()
         self.mode = mode
-        self.config_file = config_file
         self.ignore_lb = ignore_lb
         self.rootpth = rootpth
         self.cropsize = tuple(cropsize)
+        self.aug = {**DEFAULT_AUGMENTATION, **(augmentation or {})}
 
-        if self.mode not in ("train", "val"):
-            raise ValueError(f"Mode '{mode}' not supported. Choose 'train' or 'val'.")
+        if self.mode not in ("train", "val", "test"):
+            raise ValueError(
+                f"Mode '{mode}' not supported. Choose 'train', 'val', or 'test'."
+            )
         if not osp.exists(rootpth):
-            raise FileNotFoundError(f"Dataset path does not exist: {rootpth}")
+            raise FileNotFoundError(f"Dataset root does not exist: {rootpth}")
 
-        # We don't actually use config_file for
-        # anything because labels are already trainIds
-        # But keep it for consistency
-        with open(self.config_file, "r") as fr:
-            labels_info = json.load(fr)
-        print(f"[INFO] Loaded {len(labels_info)} classes from {config_file}")
-        """Parse Image Directory."""
+        img_dir = osp.join(rootpth, "images", mode)
+        label_dir = osp.join(rootpth, "masks", mode)
+        if not osp.exists(img_dir):
+            raise FileNotFoundError(f"Image directory not found: {img_dir}")
+        if not osp.exists(label_dir):
+            raise FileNotFoundError(f"Mask directory not found: {label_dir}")
+
+        # --- Load image and label paths ------------------------------------
+        self.imnames = []
         self.imgs = {}
-        imgnames = []
-        impth = osp.join(self.rootpth, self.mode)
-        folders = sorted(os.listdir(impth))
-        for fd in folders:
-            fdpth = osp.join(impth, fd, "Images")
-            if not osp.exists(fdpth):
-                continue
-            im_names = [f for f in os.listdir(fdpth) if f.endswith(".png")]
-            names = [os.path.splitext(fn)[0] for fn in im_names]
-            paths = [osp.join(fdpth, fn) for fn in im_names]
-            imgnames.extend(names)
-            self.imgs.update(dict(zip(names, paths)))
-
-        """ Parse GT Directory """
         self.labels = {}
-        gtnames = []
-        gtpth = osp.join(self.rootpth, self.mode)
-        folders = sorted(os.listdir(gtpth))
-        for fd in folders:
-            fdpth = osp.join(gtpth, fd, "TrainId")
-            if not osp.exists(fdpth):
-                continue
-            lb_names = [f for f in os.listdir(fdpth) if f.endswith(".png")]
-            names = [os.path.splitext(fn)[0] for fn in lb_names]
-            paths = [osp.join(fdpth, fn) for fn in lb_names]
-            gtnames.extend(names)
-            self.labels.update(dict(zip(names, paths)))
 
-        self.imnames = imgnames
-        self.len = len(self.imnames)
+        imgnames = sorted(fn for fn in os.listdir(img_dir) if fn.endswith(".png"))
+        for fn in imgnames:
+            stem = osp.splitext(fn)[0]
+            self.imgs[stem] = osp.join(img_dir, fn)
+            label_path = osp.join(label_dir, fn)
+            if osp.exists(label_path):
+                self.labels[stem] = label_path
+            self.imnames.append(stem)
 
-        # Safety check
-        missing = set(self.imnames) - set(self.labels.keys())
+        # Drop any image that has no matching mask
+        missing = [name for name in self.imnames if name not in self.labels]
         if missing:
-            print(
-                f"[WARN] Missing labels for {len(missing)}"
-                f" images: {list(missing)[:5]}..."
+            warnings.warn(
+                f"{len(missing)} image(s) have no matching mask in {label_dir} "
+                f"and will be skipped: {sorted(missing)[:5]}…"
             )
         self.imnames = [name for name in self.imnames if name in self.labels]
+
+        if len(self.imnames) == 0:
+            raise RuntimeError(
+                f"No valid image-mask pairs found for mode='{mode}' in {rootpth}."
+            )
+
         self.len = len(self.imnames)
-        """Preprocessing and Augmentation."""
+
+        # --- Image normalisation --------------------------------------------------
+        # Mean/std computed from the UAVid train set (see
+        # src/datasets/compute_uavid_stats.py) — distinct from ImageNet stats.
         self.to_tensor = transforms.Compose(
             [
                 transforms.ToTensor(),
                 transforms.Normalize(
-                    mean=(0.480, 0.499, 0.457), std=(0.225, 0.208, 0.228)
+                    mean=(0.480, 0.499, 0.457),
+                    std=(0.225, 0.208, 0.228),
                 ),
             ]
         )
 
-        # Training augmentations
-        # Only applied in 'train' mode
-        # Geometric → Photometric → Regularization is the recommended order.
+        # --- Training augmentation (Geometric → Photometric → Regularisation) ---
+        # Geometric/photometric parameters mirror the YOLO26 pipeline's
+        # augmentation config (see DEFAULT_AUGMENTATION above); RandomGamma/
+        # RandomNoise/RandomCutout are CABiNet-specific extras layered on
+        # top, not part of the YOLO26 alignment.
+        degrees = float(self.aug["degrees"])
+        scale = float(self.aug["scale"])
         self.trans_train = (
             Compose(
                 [
-                    # Geometric
-                    RandomHorizontalFlip(p=0.2),
-                    RandomRotate(degrees=(-10, 10), ignore_label=self.ignore_lb),
-                    RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
+                    RandomHorizontalFlip(p=float(self.aug["fliplr"])),
+                    RandomVerticalFlip(p=float(self.aug["flipud"])),
+                    RandomTranslate(
+                        translate=float(self.aug["translate"]),
+                        ignore_label=self.ignore_lb,
+                    ),
+                    RandomRotate(
+                        degrees=(-degrees, degrees), ignore_label=self.ignore_lb
+                    ),
+                    RandomScale((1.0 - scale, 1.0 + scale), continuous=True),
                     RandomCrop(
                         size=self.cropsize,
                         pad_if_needed=True,
                         ignore_label=self.ignore_lb,
                     ),
-                    # Photometric
-                    RandomColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+                    RandomHSV(
+                        hgain=float(self.aug["hsv_h"]),
+                        sgain=float(self.aug["hsv_s"]),
+                        vgain=float(self.aug["hsv_v"]),
+                    ),
+                    RandomColorJitter(contrast=0.5),
                     RandomGamma(gamma_range=(0.8, 1.2), p=0.3),
                     RandomNoise(mode="gaussian", sigma=0.03, p=0.3),
-                    # Regularization
                     RandomCutout(p=0.3, size=64),
                 ]
             )
             if mode == "train"
             else None
         )
+        self.mixup_p = float(self.aug["mixup"]) if mode == "train" else 0.0
 
-        print(f"[INFO] UAVid dataset loaded: {self.len} samples ({mode})")
+        print(
+            f"[INFO] UAVid dataset loaded: {self.len} samples ({mode}) from {img_dir}"
+        )
 
-    def __getitem__(self, idx):
-        fn = self.imnames[idx]
-        impth = self.imgs[fn]
-        lbpth = self.labels[fn]
+    def _load_one(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Load, augment, and tensorize a single sample (no MixUp)."""
+        stem = self.imnames[idx]
+        img = Image.open(self.imgs[stem]).convert("RGB")
+        label = Image.open(self.labels[stem])
+        if label.mode != "L":
+            label = label.convert("L")
 
-        img = Image.open(impth).convert("RGB")  # (3840, 2160, 3)
-        label = Image.open(lbpth)  # (3840, 2160), mode='L', values=trainId
+        if self.mode == "train" and self.trans_train is not None:
+            im_lb = self.trans_train({"im": img, "lb": label})
+            img, label = im_lb["im"], im_lb["lb"]
 
-        w, h = img.size  # Should be 3840 x 2160
-        if w != 3840 or h != 2160:
-            # Resize only if needed (e.g., test set might vary)
-            img = img.resize((3840, 2160), Image.BILINEAR)
-            label = label.resize((3840, 2160), Image.NEAREST)
+        img_t = self.to_tensor(img)
+        label_np = np.array(label, dtype=np.int64)  # (H, W), already final class IDs
+        label_t = torch.from_numpy(label_np).long()
+        return img_t, label_t
 
-        half_w, half_h = w // 2, h // 2  # 1920, 1080
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        img, label = self._load_one(idx)
 
-        img_patches = []
-        label_patches = []
+        if (
+            self.mode == "train"
+            and self.mixup_p > 0
+            and np.random.random() < self.mixup_p
+        ):
+            other_idx = int(np.random.randint(0, self.len))
+            img2, label2 = self._load_one(other_idx)
+            # Both samples went through the same RandomCrop, so shapes match.
+            r = float(np.random.beta(32.0, 32.0))  # matches Ultralytics' MixUp exactly
+            img = img * r + img2 * (1.0 - r)
+            # Class-ID masks can't be blended the same way (no meaningful
+            # "average" of two class indices) — take the label from
+            # whichever image contributed the larger share of the blend.
+            label = label if r >= 0.5 else label2
 
-        # Define the four quadrants
-        patches = [
-            (0, 0, half_w, half_h),  # top-left
-            (half_w, 0, w, half_h),  # top-right
-            (0, half_h, half_w, h),  # bottom-left
-            (half_w, half_h, w, h),  # bottom-right
-        ]
+        return img, label
 
-        for i, (left, upper, right, lower) in enumerate(patches):
-            box = (left, upper, right, lower)
-
-            # Crop image and label
-            img_patch = img.crop(box)
-            label_patch = label.crop(box)
-
-            # Apply training augmentations (optional: shared RNG for consistency?)
-            if self.mode == "train" and self.trans_train is not None:
-                im_lb = {"im": img_patch, "lb": label_patch}
-                try:
-                    im_lb = self.trans_train(im_lb)
-                    img_patch, label_patch = im_lb["im"], im_lb["lb"]
-                except Exception as e:
-                    print(f"[WARN] Augmentation failed on patch {i} of {fn}: {e}")
-
-            # Convert to tensor
-            img_tensor = self.to_tensor(img_patch)  # (3, H, W)
-
-            # Convert label to numpy -> long tensor
-            label_np = np.array(label_patch, dtype=np.int64)
-            label_tensor = torch.from_numpy(label_np).long()  # (H, W)
-
-            img_patches.append(img_tensor)
-            label_patches.append(label_tensor)
-
-        # Return list of patches (will be flattened in collate_fn)
-        return {
-            "img_patches": img_patches,
-            "label_patches": label_patches,
-            "name": fn,
-            "original_size": (h, w),
-        }
-
-    def __len__(self):
+    def __len__(self) -> int:
         return self.len
 
 
-# === Test Block (Fixed) ===
+# ---------------------------------------------------------------------------
+# Smoke test (run: python src/datasets/uavid.py)
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    from pathlib import Path
     import sys
 
-    # Resolve config path relative to this file
-    proj_root = Path(__file__).parent.parent.parent
-    config_path = proj_root / "legacy" / "train_uavid.json"
-
-    if not config_path.exists():
-        print(f"Config not found at {config_path}, skipping test.")
+    rootpth = os.environ.get("UAVID_YOLO_ROOT", "")
+    if not rootpth:
+        print(
+            "Set UAVID_YOLO_ROOT=/path/to/converted/uavid_yolo and re-run "
+            "(this must be the OUTPUT of convert_uavid_to_yolo.py, not raw UAVid data)."
+        )
         sys.exit(0)
 
-    with open(config_path, "r") as f:
-        params = json.load(f)
-
-    dataset_config = params["dataset_config"]
-    ds = UAVid(
-        config_file=dataset_config["dataset_config_file"],
-        ignore_lb=dataset_config["ignore_idx"],
-        rootpth=dataset_config["dataset_path"],
-        cropsize=dataset_config["cropsize"],
-        mode="train",
-    )
-
-    print(f"Dataset loaded with {len(ds)} samples.")
-
-    uni = []
-    from tqdm import tqdm
-
-    for item in tqdm(ds, desc="Validating labels"):
-        for lb in item["label_patches"]:
-            lb_np = lb.numpy()
-            unique_labels = np.unique(lb_np[lb_np != ds.ignore_lb])  # Exclude ignore
-            uni.extend(unique_labels.tolist())
-
-    print("Unique training IDs found:", sorted(set(uni)))
+    for split in ("train", "val", "test"):
+        try:
+            ds = UAVid(
+                ignore_lb=255,
+                rootpth=rootpth,
+                cropsize=(1024, 1024),
+                mode=split,
+            )
+        except (FileNotFoundError, RuntimeError) as exc:
+            print(f"{split}: skipped ({exc})")
+            continue
+        print(f"{split}: {len(ds)} samples")
+        img, lb = ds[0]
+        unique = torch.unique(lb[lb != 255])
+        print(f"  img shape: {tuple(img.shape)}, label shape: {tuple(lb.shape)}")
+        print(f"  unique class IDs in first item: {sorted(unique.tolist())}")

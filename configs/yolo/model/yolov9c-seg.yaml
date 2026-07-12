@@ -1,0 +1,5 @@
+# YOLOv9 Compact — Segmentation
+# ~27.9M parameters | ~159.4 GFLOPs
+# Programmable Gradient Information (PGI) architecture
+model_name: yolov9c-seg.pt
+run_name: yolov9c

@@ -1,0 +1,4 @@
+# YOLO26 Small — Semantic Segmentation
+# ~10.0M parameters | ~22.8 GFLOPs
+model_name: yolo26s-sem.pt
+run_name: yolo26s

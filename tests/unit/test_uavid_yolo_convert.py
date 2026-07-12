@@ -1,0 +1,514 @@
+"""Tests for src/scripts/convert_uavid_to_yolo.py
+
+Covers:
+  - build_colour_map: correct class IDs; Clutter is valid (id 0), never ignored
+  - build_lut: LUT entries match colour_map
+  - build_trainid_lut: Clutter→0 (CABiNet trainId), unknown colour→255
+  - convert_mask: pixel-level correctness, clutter→0, unknown colour→255
+  - get_yolo_class_names: ordering and count
+  - discover_sequences: finds sequence dirs with Images/ sub-dir
+  - iter_sequences: correct enumeration, error on missing seq
+  - convert_sequences: writes masks and symlinks for given sequences
+  - Integration: round-trip (write → read back, values match)
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+from PIL import Image
+
+from src.scripts.convert_uavid_to_yolo import (
+    IGNORE_LABEL,
+    build_colour_map,
+    build_lut,
+    build_trainid_lut,
+    convert_mask,
+    convert_sequences,
+    discover_sequences,
+    get_yolo_class_names,
+    iter_sequences,
+    load_labels_info,
+)
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+# Minimal UAVid_info.json for testing (mirrors the real file structure)
+MINIMAL_INFO = [
+    {
+        "hasInstances": False,
+        "category": "void",
+        "catid": 0,
+        "name": "Clutter",
+        "ignoreInEval": False,
+        "id": 0,
+        "color": [0, 0, 0],
+        "trainId": 0,
+    },
+    {
+        "hasInstances": False,
+        "category": "construction",
+        "catid": 1,
+        "name": "Building",
+        "ignoreInEval": False,
+        "id": 1,
+        "color": [128, 0, 0],
+        "trainId": 1,
+    },
+    {
+        "hasInstances": False,
+        "category": "flat",
+        "catid": 2,
+        "name": "Road",
+        "ignoreInEval": False,
+        "id": 2,
+        "color": [128, 64, 128],
+        "trainId": 2,
+    },
+    {
+        "hasInstances": False,
+        "category": "vehicle",
+        "catid": 3,
+        "name": "Static Car",
+        "ignoreInEval": False,
+        "id": 3,
+        "color": [192, 0, 192],
+        "trainId": 3,
+    },
+    {
+        "hasInstances": False,
+        "category": "vegetation",
+        "catid": 4,
+        "name": "Tree",
+        "ignoreInEval": False,
+        "id": 4,
+        "color": [0, 128, 0],
+        "trainId": 4,
+    },
+    {
+        "hasInstances": False,
+        "category": "vegetation",
+        "catid": 4,
+        "name": "Vegetation",
+        "ignoreInEval": False,
+        "id": 5,
+        "color": [128, 128, 0],
+        "trainId": 5,
+    },
+    {
+        "hasInstances": False,
+        "category": "person",
+        "catid": 5,
+        "name": "Human",
+        "ignoreInEval": False,
+        "id": 6,
+        "color": [64, 64, 0],
+        "trainId": 6,
+    },
+    {
+        "hasInstances": False,
+        "category": "vehicle",
+        "catid": 3,
+        "name": "Moving Car",
+        "ignoreInEval": False,
+        "id": 7,
+        "color": [64, 0, 128],
+        "trainId": 7,
+    },
+]
+
+
+@pytest.fixture()
+def labels_info() -> list[dict]:
+    return MINIMAL_INFO
+
+
+@pytest.fixture()
+def colour_map(labels_info):
+    return build_colour_map(labels_info)
+
+
+@pytest.fixture()
+def lut(colour_map):
+    return build_lut(colour_map)
+
+
+@pytest.fixture()
+def info_json_path(tmp_path) -> Path:
+    p = tmp_path / "UAVid_info.json"
+    p.write_text(json.dumps(MINIMAL_INFO))
+    return p
+
+
+# ---------------------------------------------------------------------------
+# build_colour_map tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildColourMap:
+    def test_clutter_maps_to_zero(self, colour_map):
+        """Clutter is a valid class (ignoreInEval=False) and is the first eval
+        class (trainId 0); should get YOLO id 0, never IGNORE_LABEL."""
+        assert colour_map[(0, 0, 0)] == 0
+
+    def test_building_maps_to_one(self, colour_map):
+        """Building is the second eval class and should get YOLO id 1."""
+        assert colour_map[(128, 0, 0)] == 1
+
+    def test_road_maps_to_two(self, colour_map):
+        """Road is the third eval class; id 2."""
+        assert colour_map[(128, 64, 128)] == 2
+
+    def test_moving_car_maps_to_seven(self, colour_map):
+        """Moving Car is the last eval class (trainId 7); should get id 7."""
+        assert colour_map[(64, 0, 128)] == 7
+
+    def test_all_eval_classes_have_unique_ids(self, colour_map):
+        """No two eval colours should share the same YOLO class id."""
+        ids = [v for v in colour_map.values() if v != IGNORE_LABEL]
+        assert len(ids) == len(set(ids))
+
+    def test_number_of_eval_classes(self, colour_map):
+        """8 eval classes — all UAVid classes are valid, including Clutter."""
+        eval_ids = [v for v in colour_map.values() if v != IGNORE_LABEL]
+        assert len(eval_ids) == 8
+
+    def test_no_class_maps_to_ignore(self, colour_map):
+        """Per the UAVid paper, no defined class (including Clutter) is ignored."""
+        assert IGNORE_LABEL not in colour_map.values()
+
+
+# ---------------------------------------------------------------------------
+# build_lut tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildLUT:
+    def test_lut_shape(self, lut):
+        assert lut.shape == (256, 256, 256)
+
+    def test_lut_dtype(self, lut):
+        assert lut.dtype == np.uint8
+
+    def test_lut_clutter_entry(self, lut):
+        assert lut[0, 0, 0] == 0
+
+    def test_lut_building_entry(self, lut):
+        assert lut[128, 0, 0] == 1
+
+    def test_lut_road_entry(self, lut):
+        assert lut[128, 64, 128] == 2
+
+    def test_unknown_colour_defaults_to_ignore(self, lut):
+        """Any colour not in the palette must default to 255."""
+        assert lut[1, 2, 3] == IGNORE_LABEL
+
+
+# ---------------------------------------------------------------------------
+# convert_mask tests
+# ---------------------------------------------------------------------------
+
+
+class TestConvertMask:
+    def _make_rgb_mask(
+        self, colours: list[tuple[int, int, int]], size=(4, 4)
+    ) -> Image.Image:
+        """Create a small RGB PIL image with blocks of specified colours."""
+        h, w = size
+        n = len(colours)
+        arr = np.zeros((h, w, 3), dtype=np.uint8)
+        for i, colour in enumerate(colours):
+            col_start = i * (w // n)
+            col_end = (i + 1) * (w // n) if i < n - 1 else w
+            arr[:, col_start:col_end] = colour
+        return Image.fromarray(arr)
+
+    def test_building_pixels_become_one(self, lut, tmp_path):
+        img = self._make_rgb_mask([(128, 0, 0)])
+        src = tmp_path / "label.png"
+        dst = tmp_path / "mask.png"
+        img.save(src)
+        convert_mask(src, dst, lut)
+        result = np.array(Image.open(dst))
+        assert (result == 1).all(), (
+            f"Expected all 1, got unique values: {np.unique(result)}"
+        )
+
+    def test_clutter_pixels_become_zero(self, lut, tmp_path):
+        """Clutter is a valid class (id 0), never the ignore label."""
+        img = self._make_rgb_mask([(0, 0, 0)])
+        src = tmp_path / "clutter.png"
+        dst = tmp_path / "mask.png"
+        img.save(src)
+        convert_mask(src, dst, lut)
+        result = np.array(Image.open(dst))
+        assert (result == 0).all()
+
+    def test_unknown_colour_becomes_ignore(self, lut, tmp_path):
+        """Pixels with an unrecognised colour must be treated as ignore."""
+        img = self._make_rgb_mask([(7, 8, 9)])  # not in palette
+        src = tmp_path / "unknown.png"
+        dst = tmp_path / "mask.png"
+        img.save(src)
+        convert_mask(src, dst, lut)
+        result = np.array(Image.open(dst))
+        assert (result == 255).all()
+
+    def test_mixed_classes_correct_ids(self, lut, tmp_path):
+        """A mask with Building + Clutter should produce ids 1 and 0 (both valid)."""
+        colours = [(128, 0, 0), (0, 0, 0)]  # Building, Clutter
+        img = self._make_rgb_mask(colours)
+        src = tmp_path / "mixed.png"
+        dst = tmp_path / "mask.png"
+        img.save(src)
+        convert_mask(src, dst, lut)
+        result = np.array(Image.open(dst))
+        unique = set(result.flatten().tolist())
+        assert unique == {1, 0}
+
+    def test_output_is_single_channel(self, lut, tmp_path):
+        img = self._make_rgb_mask([(128, 0, 0)])
+        src = tmp_path / "src.png"
+        dst = tmp_path / "dst.png"
+        img.save(src)
+        convert_mask(src, dst, lut)
+        out = Image.open(dst)
+        assert out.mode == "L", f"Expected mode L, got {out.mode}"
+
+    def test_dry_run_does_not_write(self, lut, tmp_path):
+        img = self._make_rgb_mask([(128, 0, 0)])
+        src = tmp_path / "src.png"
+        dst = tmp_path / "dst.png"
+        img.save(src)
+        convert_mask(src, dst, lut, dry_run=True)
+        assert not dst.exists()
+
+    def test_all_eight_eval_classes_round_trip(self, lut, colour_map, tmp_path):
+        """Each of the 8 eval colours (including Clutter) should survive a full round-trip."""
+        eval_colours = [(c, v) for c, v in colour_map.items() if v != IGNORE_LABEL]
+        n = len(eval_colours)
+        w, h = n * 4, 4
+        arr = np.zeros((h, w, 3), dtype=np.uint8)
+        expected_ids = []
+        for i, (colour, cls_id) in enumerate(eval_colours):
+            arr[:, i * 4 : (i + 1) * 4] = colour
+            expected_ids.extend([cls_id] * 4)
+
+        src = tmp_path / "all_classes.png"
+        dst = tmp_path / "all_classes_mask.png"
+        Image.fromarray(arr).save(src)
+        convert_mask(src, dst, lut)
+
+        result = np.array(Image.open(dst))  # (h, w)
+        actual_ids = result[0, :].tolist()
+        assert actual_ids == expected_ids
+
+
+# ---------------------------------------------------------------------------
+# get_yolo_class_names tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetYoloClassNames:
+    def test_eight_classes_returned(self, labels_info):
+        names = get_yolo_class_names(labels_info)
+        assert len(names) == 8
+
+    def test_clutter_is_class_zero(self, labels_info):
+        """Clutter is a valid class and must be present, at id 0 (its trainId)."""
+        names = get_yolo_class_names(labels_info)
+        assert names[0] == "Clutter"
+
+    def test_building_is_class_one(self, labels_info):
+        names = get_yolo_class_names(labels_info)
+        assert names[1] == "Building"
+
+    def test_ids_are_consecutive(self, labels_info):
+        names = get_yolo_class_names(labels_info)
+        assert list(names.keys()) == list(range(len(names)))
+
+
+# ---------------------------------------------------------------------------
+# load_labels_info tests
+# ---------------------------------------------------------------------------
+
+
+class TestLoadLabelsInfo:
+    def test_loads_eight_entries(self, info_json_path):
+        info = load_labels_info(info_json_path)
+        assert len(info) == 8
+
+    def test_real_info_file(self):
+        """Smoke-test against the actual project UAVid_info.json."""
+        real_path = Path("configs/UAVid_info.json")
+        if not real_path.exists():
+            pytest.skip("UAVid_info.json not found (running outside project root)")
+        info = load_labels_info(real_path)
+        assert len(info) == 8
+        clutter = next(c for c in info if c["name"] == "Clutter")
+        assert clutter["ignoreInEval"] is False
+        assert clutter["color"] == [0, 0, 0]
+
+
+# ---------------------------------------------------------------------------
+# build_trainid_lut tests  (CABiNet training — Clutter=0, not 255)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTrainidLut:
+    def test_clutter_maps_to_zero(self, labels_info):
+        """Clutter must keep its trainId=0 (included in loss, excluded in mIoU)."""
+        lut = build_trainid_lut(labels_info)
+        assert lut[0, 0, 0] == 0
+
+    def test_building_maps_to_trainid_one(self, labels_info):
+        lut = build_trainid_lut(labels_info)
+        assert lut[128, 0, 0] == 1
+
+    def test_moving_car_maps_to_trainid_seven(self, labels_info):
+        lut = build_trainid_lut(labels_info)
+        assert lut[64, 0, 128] == 7
+
+    def test_unknown_colour_maps_to_ignore(self, labels_info):
+        lut = build_trainid_lut(labels_info, ignore_lb=255)
+        assert lut[7, 8, 9] == 255
+
+    def test_matches_yolo_lut_for_known_classes(self, labels_info):
+        """Since no class is ignoreInEval, the YOLO LUT and CABiNet trainId LUT
+        now agree exactly for every known colour (both use raw trainId 0-7),
+        including Clutter → 0 in both."""
+        trainid_lut = build_trainid_lut(labels_info)
+        yolo_lut = build_lut(build_colour_map(labels_info))
+        assert trainid_lut[0, 0, 0] == 0  # Clutter → 0 in CABiNet
+        assert yolo_lut[0, 0, 0] == 0  # Clutter → 0 in YOLO too (valid class)
+        for cls in labels_info:
+            r, g, b = cls["color"]
+            assert trainid_lut[r, g, b] == yolo_lut[r, g, b] == cls["trainId"]
+
+
+# ---------------------------------------------------------------------------
+# discover_sequences / iter_sequences tests
+# ---------------------------------------------------------------------------
+
+
+def _make_uavid_tree(root: Path, seqs: list[str], n_images: int = 2) -> None:
+    """Create a minimal UAVid-style directory tree for testing."""
+    colours = {
+        "000001": (128, 0, 0),  # Building
+        "000002": (0, 0, 0),  # Clutter
+    }
+    for seq in seqs:
+        img_dir = root / seq / "Images"
+        label_dir = root / seq / "Labels"
+        img_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        for i, (stem, colour) in enumerate(list(colours.items())[:n_images]):
+            arr = np.full((4, 4, 3), colour, dtype=np.uint8)
+            Image.fromarray(arr).save(img_dir / f"{stem}.png")
+            Image.fromarray(arr).save(label_dir / f"{stem}.png")
+
+
+class TestDiscoverSequences:
+    def test_finds_seq_dirs_with_images(self, tmp_path):
+        _make_uavid_tree(tmp_path, ["seq1", "seq2", "seq16"])
+        found = discover_sequences(tmp_path)
+        assert found == ["seq1", "seq16", "seq2"]
+
+    def test_ignores_dirs_without_images(self, tmp_path):
+        """A directory without an Images/ sub-dir should not be returned."""
+        (tmp_path / "not_a_seq").mkdir()
+        _make_uavid_tree(tmp_path, ["seq1"])
+        found = discover_sequences(tmp_path)
+        assert "not_a_seq" not in found
+        assert "seq1" in found
+
+    def test_empty_root_returns_empty(self, tmp_path):
+        assert discover_sequences(tmp_path) == []
+
+
+class TestIterSequences:
+    def test_returns_correct_entries(self, tmp_path):
+        _make_uavid_tree(tmp_path, ["seq1", "seq2"], n_images=2)
+        entries = iter_sequences(tmp_path, ["seq1", "seq2"])
+        # Each seq has 2 images → 4 total
+        assert len(entries) == 4
+
+    def test_keys_unique_across_sequences(self, tmp_path):
+        """Same image filename in different sequences must not produce duplicate entries."""
+        _make_uavid_tree(tmp_path, ["seq1", "seq2"])  # both have 000001.png
+        entries = iter_sequences(tmp_path, ["seq1", "seq2"])
+        keys = [(seq, stem) for _, seq, stem in entries]
+        assert len(keys) == len(set(keys)), "Duplicate (seq, stem) pairs found"
+
+    def test_missing_sequence_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="seq99"):
+            iter_sequences(tmp_path, ["seq99"])
+
+    def test_respects_sequence_list_order(self, tmp_path):
+        _make_uavid_tree(tmp_path, ["seq1", "seq2", "seq16"])
+        entries = iter_sequences(tmp_path, ["seq16"])
+        seqs_seen = {seq for _, seq, _ in entries}
+        assert seqs_seen == {"seq16"}
+
+
+class TestConvertSequences:
+    def test_converts_masks_and_creates_images_dir(self, tmp_path, lut):
+        src = tmp_path / "uavid_train"
+        dst = tmp_path / "uavid_yolo"
+        _make_uavid_tree(src, ["seq1", "seq16"])
+        n = convert_sequences(
+            src_root=src,
+            dst_root=dst,
+            split="train",
+            seqs=["seq1"],
+            lut=lut,
+            workers=1,
+            dry_run=False,
+        )
+        assert n == 2  # two images in seq1
+        assert (dst / "masks" / "train").exists()
+        assert (dst / "images" / "train").exists()
+
+    def test_dry_run_writes_nothing(self, tmp_path, lut):
+        src = tmp_path / "uavid_train"
+        dst = tmp_path / "uavid_yolo"
+        _make_uavid_tree(src, ["seq1"])
+        n = convert_sequences(
+            src_root=src,
+            dst_root=dst,
+            split="train",
+            seqs=["seq1"],
+            lut=lut,
+            dry_run=True,
+        )
+        assert n == 2
+        assert not dst.exists()
+
+    def test_train_val_separation(self, tmp_path, lut):
+        """seq1 → train, seq16 → val; masks must not mix."""
+        src = tmp_path / "uavid_train"
+        dst = tmp_path / "uavid_yolo"
+        _make_uavid_tree(src, ["seq1", "seq16"])
+
+        convert_sequences(src, dst, "train", ["seq1"], lut)
+        convert_sequences(src, dst, "val", ["seq16"], lut)
+
+        train_masks = list((dst / "masks" / "train").glob("*.png"))
+        val_masks = list((dst / "masks" / "val").glob("*.png"))
+
+        assert all("seq1_" in m.name for m in train_masks)
+        assert all("seq16_" in m.name for m in val_masks)
+
+    def test_output_masks_are_single_channel(self, tmp_path, lut):
+        src = tmp_path / "uavid_train"
+        dst = tmp_path / "uavid_yolo"
+        _make_uavid_tree(src, ["seq1"])
+        convert_sequences(src, dst, "train", ["seq1"], lut)
+        for mask_path in (dst / "masks" / "train").glob("*.png"):
+            assert Image.open(mask_path).mode == "L"

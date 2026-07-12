@@ -1,0 +1,67 @@
+# UAVid dataset configuration for Ultralytics YOLO semantic segmentation
+#
+# Format: https://docs.ultralytics.com/datasets/semantic/
+# Masks:  single-channel PNG, pixel value = class index (0-7). 255 remains reserved
+#         for genuinely unrecognized colours (e.g. corrupted/anti-aliased pixels) —
+#         all 8 defined UAVid classes, including Clutter, are valid and used in both
+#         training and evaluation, per the original UAVid paper.
+#
+# Pre-processing required
+# -----------------------
+# UAVid distributes 3-channel RGB colour-coded labels (Labels/ directory).
+# Convert them to YOLO single-channel format first:
+#
+#   python src/scripts/convert_uavid_to_yolo.py \
+#       --src /path/to/uavid \
+#       --dst /path/to/uavid_yolo \
+#       --info configs/UAVid_info.json \
+#       --split both
+#
+# Then set the ``path`` field below to /path/to/uavid_yolo.
+#
+# Class mapping (all 8 classes are valid; none are ignored)
+# -----------------------------------------------------------
+#   0  Clutter       [  0,   0,   0]
+#   1  Building      [128,   0,   0]
+#   2  Road          [128,  64, 128]
+#   3  Static Car    [192,   0, 192]
+#   4  Tree          [  0, 128,   0]
+#   5  Vegetation    [128, 128,   0]
+#   6  Human         [ 64,  64,   0]
+#   7  Moving Car    [ 64,   0, 128]
+
+# Root path. Ultralytics parses this file with plain YAML (no Hydra/OmegaConf
+# env-var resolution), so this must be a literal path — edit it directly for
+# your machine, or point `data=` at a copy of this file with your own path.
+path: /home/neural_debugger/Downloads/datasets/uavid_dataset/UAVid-YOLO
+
+train: images/train # relative to path
+val: images/val # relative to path
+test: images/test # relative to path
+
+# Mask directory (must mirror images/ structure): images/train -> masks/train, etc.
+masks_dir: masks # relative to path
+
+# Number of semantic classes (all 8 UAVid classes, Clutter included)
+nc: 8
+
+# Class names — order must match the integer class IDs above
+names:
+  0: Clutter
+  1: Building
+  2: Road
+  3: StaticCar
+  4: Tree
+  5: Vegetation
+  6: Human
+  7: MovingCar
+
+# Ultralytics training command example
+# -------------------------------------
+# yolo semantic train \
+#     model=yolo26n-sem.pt \
+#     data=configs/dataset/uavid_yolo.yaml \
+#     imgsz=1024 \
+#     epochs=100 \
+#     batch=4 \
+#     device=0

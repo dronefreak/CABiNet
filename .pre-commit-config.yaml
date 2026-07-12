@@ -21,16 +21,9 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
 
-  # ---------- PYTHON FORMAT ----------
-  - repo: https://github.com/psf/black
-    rev: 25.12.0
-    hooks:
-      - id: black
-        args: [--line-length=88]
-
   # ---------- PYTHON LINT (NO FIX) ----------
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.10
+    rev: v0.15.21
     hooks:
       - id: ruff
         args: [--fix]
