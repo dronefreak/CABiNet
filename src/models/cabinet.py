@@ -301,7 +301,6 @@ class CABiNet(nn.Module):
 
 
 if __name__ == "__main__":
-
     input_size = (1, 3, 512, 512)
     x = torch.randn(input_size)
 
