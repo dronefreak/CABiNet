@@ -43,7 +43,7 @@ jobs:
       fail-fast: false
       matrix:
         # torch 2.x requires Python ≥3.9; 3.10 is the primary dev target
-        python-version: ["3.10", "3.11"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
