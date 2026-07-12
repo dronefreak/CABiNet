@@ -10,6 +10,10 @@
 
 CABiNet (Context Aggregation Network) is a dual-branch convolutional neural network designed for real-time semantic segmentation with significantly lower computational costs compared to state-of-the-art methods while maintaining competitive accuracy. The architecture is specifically optimized for autonomous systems and real-time applications.
 
+<p align="center">
+  <img src="assets/showcase_mosaic.gif" alt="UAVid Semantic Segmentation Demo">
+</p>
+
 ## Key Features
 
 - **High Performance**: Achieves 75.9% mIoU on Cityscapes test set at 76 FPS (NVIDIA RTX 2080Ti)
