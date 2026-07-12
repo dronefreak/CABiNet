@@ -3,16 +3,16 @@
 # =============================================================================
 # Usage (after training):
 #   Single-scale:
-#     yolo segment val cfg=configs/yolo/uavid_val.yaml \
-#         model=runs/uavid/yolov8m/weights/best.pt
+#     yolo semantic val cfg=configs/yolo/uavid_val.yaml \
+#         model=runs/uavid/yolo26n/weights/best.pt
 #
 #   Test-time augmentation (TTA):
-#     yolo segment val cfg=configs/yolo/uavid_val.yaml \
-#         model=runs/uavid/yolov8m/weights/best.pt \
+#     yolo semantic val cfg=configs/yolo/uavid_val.yaml \
+#         model=runs/uavid/yolo26n/weights/best.pt \
 #         augment=True
 # =============================================================================
 
-task: segment
+task: semantic
 data: configs/dataset/uavid_yolo.yaml
 
 imgsz: 1024
@@ -21,7 +21,6 @@ split: val
 device: 0
 workers: 4
 
-overlap_mask: False # must match training setting
 save_json: True # save per-image results for offline analysis
 plots: True # confusion matrix + class-level IoU bar chart
 verbose: True

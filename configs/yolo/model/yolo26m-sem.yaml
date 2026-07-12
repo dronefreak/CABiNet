@@ -1,0 +1,4 @@
+# YOLO26 Medium — Semantic Segmentation
+# ~21.9M parameters | ~75.4 GFLOPs
+model_name: yolo26m-sem.pt
+run_name: yolo26m

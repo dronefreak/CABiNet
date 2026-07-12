@@ -4,7 +4,7 @@
     "category": "void",
     "catid": 0,
     "name": "Clutter",
-    "ignoreInEval": true,
+    "ignoreInEval": false,
     "id": 0,
     "color": [0, 0, 0],
     "trainId": 0

@@ -3,21 +3,30 @@
 
 import logging
 import math
-from typing import Any, Dict, Sequence, Tuple
+from pathlib import Path
+from typing import Any, Dict, Sequence, Tuple, cast
 
+import hydra
 import numpy as np
+from omegaconf import DictConfig, OmegaConf
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from src.datasets.registry import DATASET_KWARGS_BUILDERS, DATASET_REGISTRY
+from src.models.cabinet import CABiNet
 from src.models.constants import EVAL_STRIDE_RATE
+from src.utils.exceptions import ConfigurationError
+from src.utils.logger import RichConsoleManager
 
 # For optional distributed support
 try:
     import torch.distributed as dist
 except ImportError:
     dist = None
+
+logger = logging.getLogger(__name__)
 
 
 class MscEvalV0(object):
@@ -247,12 +256,113 @@ class MscEvalV0(object):
         return self.evaluate()
 
 
+def _load_model_weights(checkpoint_path: Path, device: torch.device) -> Dict[str, Any]:
+    """Load model weights from either a raw state_dict (*_best.pth / the
+    final saved .pth) or a full training checkpoint (checkpoint_last.pth,
+    which wraps the weights under a 'model_state' key alongside optimizer/
+    EMA/scaler state)."""
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    if isinstance(ckpt, dict) and "model_state" in ckpt:
+        return cast(Dict[str, Any], ckpt["model_state"])
+    return cast(Dict[str, Any], ckpt)
+
+
+@hydra.main(version_base=None, config_path="../../configs", config_name="evaluate")
+def evaluate_checkpoint(cfg: DictConfig) -> None:
+    console = RichConsoleManager.get_console()
+    console.print(OmegaConf.to_yaml(cfg), style="warning")
+
+    checkpoint_path = Path(cfg.checkpoint_path)
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+    split = str(cfg.split)
+    if split == "train":
+        raise ConfigurationError(
+            "split='train' is not supported — the dataset classes apply "
+            "training augmentation (RandomCrop, flips, colour jitter, ...) "
+            "whenever mode='train', which would corrupt evaluation metrics. "
+            "Use split=val or split=test."
+        )
+
+    dataset_name = cfg.dataset.name.lower()
+    dataset_cls = DATASET_REGISTRY.get(dataset_name)
+    if dataset_cls is None:
+        raise NotImplementedError(f"Dataset '{cfg.dataset.name}' not supported.")
+
+    n_classes = cfg.dataset.num_classes
+    ignore_idx = cfg.dataset.ignore_idx
+    cropsize = cfg.dataset.cropsize
+    is_uavid = dataset_name == "uavid"
+
+    # Same constraint as train.py: UAVid source images are not uniform
+    # resolution, and val/test mode applies no crop — a DataLoader batching
+    # more than one sample will crash inside torch.stack.
+    if is_uavid and int(cfg.validation_config.batch_size) != 1:
+        raise ConfigurationError(
+            "validation_config.batch_size must be 1 for UAVid — source images "
+            "are not uniform resolution and val/test mode applies no crop, so "
+            "a larger batch cannot be stacked. Set validation_config.batch_size=1."
+        )
+
+    common_args = DATASET_KWARGS_BUILDERS[dataset_name](cfg, ignore_idx, cropsize)
+    ds = dataset_cls(**common_args, mode=split)
+
+    dl = DataLoader(
+        ds,
+        batch_size=int(cfg.validation_config.batch_size),
+        shuffle=False,
+        num_workers=int(cfg.validation_config.num_workers),
+        pin_memory=True,
+        drop_last=False,
+    )
+    console.print(
+        f"Loaded {len(ds)} samples from split='{split}' ({dataset_name})", style="info"
+    )
+
+    requested_device = str(cfg.device)
+    if requested_device.startswith("cuda") and not torch.cuda.is_available():
+        logger.warning("CUDA requested but not available — falling back to CPU.")
+        device = torch.device("cpu")
+    else:
+        device = torch.device(requested_device)
+
+    net = CABiNet(
+        n_classes=n_classes,
+        backbone_weights=None,  # loading a fully trained checkpoint below, not a bare backbone
+        mode=cfg.model.mode,
+        cfgs=cfg.model.cfgs,
+    )
+    state_dict = _load_model_weights(checkpoint_path, device)
+    net.load_state_dict(state_dict)
+    net.to(device)
+    net.eval()
+    console.print(f"Loaded checkpoint: {checkpoint_path}", style="info")
+
+    eval_scales = tuple(cfg.validation_config.get("eval_scales", (1.0,)))
+    eval_flip = bool(cfg.validation_config.get("flip", True))
+
+    evaluator = MscEvalV0(
+        model=net,
+        dataloader=dl,
+        device=device,
+        n_classes=n_classes,
+        ignore_label=ignore_idx,
+        scales=eval_scales,
+        flip=eval_flip,
+        cropsize=max(cropsize),
+    )
+
+    console.rule("[bold green]Starting Evaluation[/bold green]")
+    results = evaluator.evaluate()
+
+    if results:
+        console.print(f"🏁 mIoU:     {results['mIoU']:.4f}", style="info")
+        console.print(f"🏁 Accuracy: {results['accuracy']:.4f}", style="info")
+        console.print("Per-class IoU:", style="info")
+        for cls_name, iou in results["iou_per_class"].items():
+            console.print(f"  {cls_name}: {iou:.4f}")
+
+
 if __name__ == "__main__":
-    # Example usage
-    # You'll need to load your actual params here
-    # For now, just test structure
-    try:
-        print("Evaluation script loaded successfully.")
-    except Exception as e:
-        logging.error(f"Evaluation failed: {e}")
-        raise
+    evaluate_checkpoint()

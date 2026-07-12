@@ -2,28 +2,31 @@
 # Ultralytics YOLO — UAVid Semantic Segmentation Training Config
 # =============================================================================
 # Usage:
-#   yolo segment train cfg=configs/yolo/uavid_train.yaml
+#   yolo semantic train cfg=configs/yolo/uavid_train.yaml
 #
 # Resume an interrupted run:
-#   yolo segment train cfg=configs/yolo/uavid_train.yaml resume=True
+#   yolo semantic train cfg=configs/yolo/uavid_train.yaml resume=True
 #
 # Multi-GPU (DDP):
-#   yolo segment train cfg=configs/yolo/uavid_train.yaml device=0,1,2,3
+#   yolo semantic train cfg=configs/yolo/uavid_train.yaml device=0,1,2,3
 #
-# Swap model variant (nano / small / large / xlarge):
-#   yolo segment train cfg=configs/yolo/uavid_train.yaml model=yolov8n-seg.pt name=yolov8n
+# Swap model variant (nano / small / medium / large / xlarge):
+#   yolo semantic train cfg=configs/yolo/uavid_train.yaml model=yolo26s-sem.pt name=yolo26s
+#
+# NOTE: 'semantic' is a dedicated Ultralytics task (dense per-pixel FCN-style
+# head, CE+Dice+aux loss, mIoU/pixel-acc metric) — distinct from 'segment'
+# (instance/polygon-based detection+mask head). Only the yolo26*-sem model
+# family supports it; yolov8/9/11-seg checkpoints do NOT apply here.
 # =============================================================================
 
 # ── Task & Model ─────────────────────────────────────────────────────────────
-task:
-  segment # use 'segment' task; single-channel class-ID masks trigger
-  # semantic-style training when overlap_mask=False
-model: yolov8m-seg.pt # pretrained checkpoint (downloads automatically)
+task: semantic
+model: yolo26n-sem.pt # pretrained checkpoint (downloads automatically)
 data: configs/dataset/uavid_yolo.yaml
 
 # ── Output ───────────────────────────────────────────────────────────────────
 project: runs/uavid # results root
-name: yolov8m # run sub-dir; change per variant (yolov8n, yolov11m, …)
+name: yolo26n # run sub-dir; change per variant (yolo26s, yolo26m, …)
 exist_ok: False # set True to overwrite a previous run with the same name
 
 # ── Core training schedule ───────────────────────────────────────────────────
@@ -71,11 +74,9 @@ warmup_momentum: 0.8 # momentum during warmup
 warmup_bias_lr: 0.1 # bias LR during warmup (higher than main to stabilise BN)
 cos_lr: True # cosine annealing (smoother than step decay for seg)
 
-# ── Segmentation-specific ────────────────────────────────────────────────────
-# overlap_mask MUST be False for semantic segmentation.
-# When True, YOLO merges instance masks — meaningless for per-pixel class labels.
-overlap_mask: False
-mask_ratio: 1 # no downsampling of semantic masks (full resolution)
+# (overlap_mask / mask_ratio are 'segment'-task-only knobs — irrelevant here
+# and intentionally omitted; the 'semantic' task always outputs one class map
+# per image, no instance-mask merging involved.)
 
 # ── Class-imbalance handling ─────────────────────────────────────────────────
 # cls_pw applies inverse-frequency class weighting to the classification loss.

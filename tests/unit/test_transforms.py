@@ -11,9 +11,12 @@ from src.datasets.transform import (
     RandomCutout,
     RandomGamma,
     RandomHorizontalFlip,
+    RandomHSV,
     RandomNoise,
     RandomRotate,
     RandomScale,
+    RandomTranslate,
+    RandomVerticalFlip,
 )
 
 
@@ -264,3 +267,120 @@ class TestRandomRotate:
         assert (
             result["im"].size == result["lb"].size
         ), "Image and label must have same size after rotation"
+
+
+class TestRandomScaleContinuous:
+    """Test RandomScale's continuous mode (matches Ultralytics' scale=X ->
+    [1-X, 1+X] semantics)."""
+
+    def test_continuous_range_respected(self, sample_image_label):
+        transform = RandomScale(scales=(0.7, 1.3), continuous=True)
+        sizes = set()
+        for _ in range(30):
+            result = transform(sample_image_label)
+            sizes.add(result["im"].size)
+        assert len(sizes) > 1, "Continuous mode should not always pick the same size"
+        for w, h in sizes:
+            assert 256 * 0.7 - 2 <= w <= 256 * 1.3 + 2
+            assert 256 * 0.7 - 2 <= h <= 256 * 1.3 + 2
+
+    def test_continuous_mode_does_not_use_discrete_scales_list(self):
+        """continuous=True must not require/consult self.scales."""
+        transform = RandomScale(scales=(0.5, 0.5), continuous=True)
+        assert not hasattr(transform, "scales")
+        assert transform.scale_range == (0.5, 0.5)
+
+    def test_discrete_mode_still_default(self, sample_image_label):
+        """continuous defaults to False — existing discrete-list behaviour
+        (e.g. CityScapes' usage) must be unaffected."""
+        transform = RandomScale(scales=[2.0])
+        result = transform(sample_image_label)
+        assert result["im"].size == (512, 512)
+
+
+class TestRandomVerticalFlip:
+    def test_flip_probability_1(self):
+        img = Image.new("RGB", (100, 100))
+        img.putpixel((10, 10), (255, 0, 0))
+        label = Image.new("L", (100, 100))
+
+        transform = RandomVerticalFlip(p=1.0)
+        result = transform({"im": img, "lb": label})
+
+        # After a vertical flip, the red pixel at row 10 moves to row 89.
+        assert result["im"].getpixel((10, 89)) == (255, 0, 0)
+
+    def test_flip_probability_0(self, sample_image_label):
+        transform = RandomVerticalFlip(p=0.0)
+        result = transform(sample_image_label)
+        assert result["im"].size == sample_image_label["im"].size
+
+
+class TestRandomTranslate:
+    def test_output_size_unchanged(self, sample_image_label):
+        transform = RandomTranslate(translate=0.1, ignore_label=255)
+        result = transform(sample_image_label)
+        assert result["im"].size == sample_image_label["im"].size
+        assert result["lb"].size == sample_image_label["lb"].size
+
+    def test_translate_introduces_ignore_label_border(self):
+        """A non-trivial shift must reveal ignore_label border on at least
+        one edge (the label was filled with a single non-ignore class)."""
+        ignore_label = 255
+        img = Image.new("RGB", (100, 100), color=(100, 100, 100))
+        lb = Image.new("L", (100, 100), color=3)
+
+        # translate=0.2 with a fixed large positive shift is not directly
+        # controllable (random), so run several trials and require at least
+        # one to show the ignore border — deterministic per-trial flakiness
+        # here would indicate a real bug, not a statistical fluke.
+        saw_ignore = False
+        for _ in range(20):
+            result = RandomTranslate(translate=0.2, ignore_label=ignore_label)(
+                {"im": img, "lb": lb}
+            )
+            if ignore_label in np.array(result["lb"]):
+                saw_ignore = True
+                break
+        assert saw_ignore, "Expected ignore_label border pixels after translation"
+
+    def test_zero_translate_is_near_identity(self, sample_image_label):
+        transform = RandomTranslate(translate=0.0, ignore_label=255)
+        result = transform(sample_image_label)
+        assert np.array_equal(
+            np.array(result["lb"]), np.array(sample_image_label["lb"])
+        )
+
+
+class TestRandomHSV:
+    def test_output_size_and_mode_unchanged(self, sample_image_label):
+        transform = RandomHSV(hgain=0.1, sgain=0.4, vgain=0.3)
+        result = transform(sample_image_label)
+        assert result["im"].size == sample_image_label["im"].size
+        assert result["im"].mode == "RGB"
+
+    def test_zero_gains_still_returns_valid_image(self, sample_image_label):
+        """hgain=sgain=vgain=0 skips the branch entirely (falsy check) —
+        image must pass through unmodified, not error."""
+        transform = RandomHSV(hgain=0.0, sgain=0.0, vgain=0.0)
+        result = transform(sample_image_label)
+        assert result["im"] == sample_image_label["im"]
+
+    def test_label_untouched(self, sample_image_label):
+        transform = RandomHSV(hgain=0.1, sgain=0.4, vgain=0.3)
+        result = transform(sample_image_label)
+        assert result["lb"] == sample_image_label["lb"]
+
+    def test_large_gains_change_pixel_values(self):
+        # A non-gray image so hue/saturation gains have a visible effect
+        # (a pure-gray pixel has saturation=0, making hue meaningless).
+        img = Image.new("RGB", (32, 32), color=(200, 60, 40))
+        lb = Image.new("L", (32, 32), color=1)
+        before = np.array(img)  # captured before the call — transforms in
+        # this module mutate the input dict's "im" entry in place.
+
+        transform = RandomHSV(hgain=0.5, sgain=0.9, vgain=0.9)
+        result = transform({"im": img, "lb": lb})
+        after = np.array(result["im"])
+
+        assert not np.array_equal(before, after)

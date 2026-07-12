@@ -27,10 +27,25 @@ class Compose(object):
 
 
 class RandomScale(object):
+    """Random resize, either from a discrete list of scale factors
+    (default) or a continuous range — pass ``continuous=True`` with
+    ``scales=(low, high)`` to sample uniformly from ``[low, high]``,
+    matching Ultralytics' ``scale`` augmentation (``scale=X`` means the
+    continuous range ``[1-X, 1+X]``)."""
+
     def __init__(
-        self, scales=(1,), interp_image=Image.BILINEAR, interp_label=Image.NEAREST
+        self,
+        scales=(1,),
+        continuous=False,
+        interp_image=Image.BILINEAR,
+        interp_label=Image.NEAREST,
     ):
-        self.scales = [float(s) for s in scales]
+        self.continuous = continuous
+        if continuous:
+            lo, hi = scales
+            self.scale_range = (float(lo), float(hi))
+        else:
+            self.scales = [float(s) for s in scales]
         self.interp_image = interp_image
         self.interp_label = interp_label
 
@@ -40,7 +55,10 @@ class RandomScale(object):
         if not (isinstance(im, Image.Image) and isinstance(lb, Image.Image)):
             raise TypeError(f"Expected PIL images, got {type(im)}, {type(lb)}")
 
-        scale = random.choice(self.scales)  # nosec B311
+        if self.continuous:
+            scale = random.uniform(*self.scale_range)  # nosec B311
+        else:
+            scale = random.choice(self.scales)  # nosec B311
         W, H = im.size
         w = int(round(W * scale))
         h = int(round(H * scale))
@@ -59,6 +77,48 @@ class RandomHorizontalFlip(object):
             return im_lb
         im = im_lb["im"].transpose(Image.FLIP_LEFT_RIGHT)
         lb = im_lb["lb"].transpose(Image.FLIP_LEFT_RIGHT)
+        return {"im": im, "lb": lb}
+
+
+class RandomVerticalFlip(object):
+    """Vertical flip — matches Ultralytics' ``flipud`` augmentation (valid
+    for top-down aerial imagery, unlike ground-level datasets)."""
+
+    def __init__(self, p=0.5):
+        self.p = p
+
+    def __call__(self, im_lb):
+        if random.random() > self.p:
+            return im_lb
+        im = im_lb["im"].transpose(Image.FLIP_TOP_BOTTOM)
+        lb = im_lb["lb"].transpose(Image.FLIP_TOP_BOTTOM)
+        return {"im": im, "lb": lb}
+
+
+class RandomTranslate(object):
+    """Random translation by up to ``translate`` fraction of image size in
+    each axis, matching Ultralytics' ``translate`` augmentation."""
+
+    def __init__(self, translate=0.05, ignore_label=255):
+        self.translate = translate
+        self.ignore_label = ignore_label
+
+    def __call__(self, im_lb):
+        im = im_lb["im"]
+        lb = im_lb["lb"]
+        w, h = im.size
+        dx = random.uniform(-self.translate, self.translate) * w  # nosec B311
+        dy = random.uniform(-self.translate, self.translate) * h  # nosec B311
+        im = im.transform(
+            im.size, Image.AFFINE, (1, 0, dx, 0, 1, dy), resample=Image.BILINEAR
+        )
+        lb = lb.transform(
+            lb.size,
+            Image.AFFINE,
+            (1, 0, dx, 0, 1, dy),
+            resample=Image.NEAREST,
+            fillcolor=self.ignore_label,
+        )
         return {"im": im, "lb": lb}
 
 
@@ -111,6 +171,47 @@ class RandomCrop(object):
 
         im_lb["im"] = im.crop(crop_box)
         im_lb["lb"] = lb.crop(crop_box)
+        return im_lb
+
+
+class RandomHSV(object):
+    """Multiplicative saturation/value + additive hue jitter in HSV colour
+    space, matching Ultralytics' ``RandomHSV`` augmentation formula exactly:
+    ``hue = (hue + gain_h * full_circle) % full_circle`` (additive, wraps),
+    ``sat = clip(sat * (1 + gain_s), 0, max)``, ``val = clip(val * (1 +
+    gain_v), 0, max)``, with each gain drawn as ``uniform(-1, 1) * hgain``
+    (etc). Reimplemented via PIL's HSV conversion rather than OpenCV — PIL's
+    H channel spans 0-255 for the full hue circle (vs OpenCV's 0-179), so
+    the hue shift is scaled to 255 instead of 180 to preserve the same
+    *fraction of the circle* shifted.
+    """
+
+    def __init__(self, hgain=0.015, sgain=0.4, vgain=0.3):
+        self.hgain = hgain
+        self.sgain = sgain
+        self.vgain = vgain
+
+    def __call__(self, im_lb):
+        if self.hgain or self.sgain or self.vgain:
+            im = im_lb["im"]
+            hsv = np.array(im.convert("HSV"), dtype=np.int16)
+
+            r_h = random.uniform(-1, 1) * self.hgain  # nosec B311
+            r_s = random.uniform(-1, 1) * self.sgain  # nosec B311
+            r_v = random.uniform(-1, 1) * self.vgain  # nosec B311
+
+            hsv[..., 0] = (hsv[..., 0] + round(r_h * 255)) % 255
+            hsv[..., 1] = np.clip(hsv[..., 1] * (r_s + 1), 0, 255)
+            hsv[..., 2] = np.clip(hsv[..., 2] * (r_v + 1), 0, 255)
+            hsv = hsv.astype(np.uint8)
+
+            # Image.fromarray(..., mode="HSV") is deprecated (removed in
+            # Pillow 13) — Image.merge is the non-deprecated equivalent.
+            im_hsv = Image.merge(
+                "HSV",
+                [Image.fromarray(hsv[..., c]) for c in range(3)],
+            )
+            im_lb["im"] = im_hsv.convert("RGB")
         return im_lb
 
 

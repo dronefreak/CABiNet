@@ -1,14 +1,21 @@
 # train_yolo.yaml
 # Hydra root config for YOLO semantic segmentation on UAVid
 #
+# Uses Ultralytics' dedicated 'semantic' task (dense per-pixel FCN-style head,
+# CE+Dice+aux loss, mIoU/pixel-acc metric) — distinct from 'segment' (instance/
+# polygon-based). Only the yolo26*-sem model family supports it.
+#
 # Usage (train):
 #   python src/scripts/train_yolo.py
-#   python src/scripts/train_yolo.py 'yolo/model@model=yolov8l-seg'
-#   python src/scripts/train_yolo.py 'yolo/model@model=yolo11m-seg'
+#   python src/scripts/train_yolo.py 'yolo/model@model=yolo26s-sem'
+#   python src/scripts/train_yolo.py 'yolo/model@model=yolo26m-sem'
+#
+# Override individual hyperparameters (Hydra dotted-path style):
+#   python src/scripts/train_yolo.py training_config.epochs=200 training_config.batch_size=8
 #
 # Usage (validate best checkpoint):
 #   python src/scripts/train_yolo.py mode=val \
-#       validation_config.weights=runs/uavid_yolo/yolov8m/weights/best.pt
+#       validation_config.weights=runs/uavid_yolo/yolo26n/weights/best.pt
 #
 # Resume interrupted training:
 #   python src/scripts/train_yolo.py training_config.resume=true
@@ -18,9 +25,9 @@
 
 defaults:
   - _self_
-  - yolo/model@model: yolov8m-seg   # override: 'yolo/model@model=yolo11x-seg'
+  - yolo/model@model: yolo26n-sem # override: 'yolo/model@model=yolo26x-sem'
 
-# Mode: train | val
+# Mode: train | val | test | predict
 mode: train
 
 # Path to the Ultralytics-format dataset YAML (not Hydra-format)
@@ -46,7 +53,7 @@ training_config:
   # Optimizer
   optimizer: SGD
   optimizer_lr_start: 0.01
-  lrf: 0.01                  # final LR = lr0 * lrf (cosine floor)
+  lrf: 0.01 # final LR = lr0 * lrf (cosine floor)
   optimizer_momentum: 0.937
   optimizer_weight_decay: 0.0005
   warmup_epochs: 3.0
@@ -55,39 +62,40 @@ training_config:
   cos_lr: true
 
   # Early stopping (epochs without val mIoU improvement)
-  patience: 30
+  patience: 50
 
   # Checkpointing
-  save_period: 10            # save extra checkpoint every N epochs (-1 = disable)
-  resume: false              # set true to resume from last.pt in the run directory
-
-  # Semantic segmentation — overlap_mask MUST be false
-  overlap_mask: false
-  mask_ratio: 1              # no mask downsampling (full resolution)
+  save_period: 50 # save extra checkpoint every N epochs (-1 = disable)
+  resume: false # set true to resume from last.pt in the run directory
 
   # Class imbalance (UAVid: Human/MovingCar are rare)
   # 0.0 = disabled (uniform), 1.0 = full inverse-frequency weighting
   cls_pw: 0.5
 
-  experiments_path: runs/uavid_yolo
+  # Resolved relative to the repo root regardless of launch directory or the
+  # global Ultralytics 'runs_dir' setting (see _resolve_experiments_path in
+  # train_yolo.py). Do NOT append the model name here — Ultralytics already
+  # appends 'name' (= model.run_name) onto 'project', so doing both doubles
+  # it (e.g. .../yolo26n/yolo26n).
+  experiments_path: experiments/${dataset.name}
   exist_ok: false
 
   # ── Augmentation ───────────────────────────────────────────────────────────
   # UAVid is aerial orthographic imagery — parameters tuned accordingly
   augmentation:
     # Geometric
-    degrees: 10.0            # rotation ±10° (matches CABiNet RandomRotate)
-    translate: 0.05          # small translation
-    scale: 0.3               # scale jitter ±30%
-    shear: 0.0               # disabled (ortho view)
-    perspective: 0.0         # disabled (no perspective distortion)
-    flipud: 0.2              # vertical flip valid for top-down aerial view
-    fliplr: 0.5              # horizontal flip
+    degrees: 10.0 # rotation ±10° (matches CABiNet RandomRotate)
+    translate: 0.05 # small translation
+    scale: 0.3 # scale jitter ±30%
+    shear: 0.0 # disabled (ortho view)
+    perspective: 0.0 # disabled (no perspective distortion)
+    flipud: 0.2 # vertical flip valid for top-down aerial view
+    fliplr: 0.5 # horizontal flip
 
     # Photometric
-    hsv_h: 0.01              # small hue shift (controlled imaging conditions)
-    hsv_s: 0.4               # saturation jitter
-    hsv_v: 0.3               # brightness jitter
+    hsv_h: 0.01 # small hue shift (controlled imaging conditions)
+    hsv_s: 0.4 # saturation jitter
+    hsv_v: 0.3 # brightness jitter
 
     # Mosaic / mixup — helps for small objects (Human, MovingCar)
     mosaic: 0.8
@@ -103,16 +111,15 @@ training_config:
 
 # ── Validation configuration ─────────────────────────────────────────────────
 validation_config:
-  batch_size: 1              # 1 for full-resolution eval
-  overlap_mask: false        # must match training setting
+  batch_size: 1 # 1 for full-resolution eval
   save_json: true
-  augment: false             # TTA: set true on CLI for augmented eval
-  weights: ~                 # null → auto-inferred from experiments_path/model.run_name
+  augment: false # TTA: set true on CLI for augmented eval
+  weights: ~ # null → auto-inferred from experiments_path/model.run_name
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 runtime:
   seed: 0
-  device: 0                  # GPU id; 'cpu' for CPU-only, '0,1' for multi-GPU DDP
+  device: 0 # GPU id; 'cpu' for CPU-only, '0,1' for multi-GPU DDP
   deterministic: true
 
 # ── Hydra output ─────────────────────────────────────────────────────────────

@@ -1,10 +1,10 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
-import json
 import os
 import os.path as osp
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
+import warnings
 
 from PIL import Image
 import numpy as np
@@ -19,150 +19,158 @@ from src.datasets.transform import (
     RandomCutout,
     RandomGamma,
     RandomHorizontalFlip,
+    RandomHSV,
     RandomNoise,
     RandomRotate,
     RandomScale,
+    RandomTranslate,
+    RandomVerticalFlip,
 )
 
-
-def uavid_collate_fn(batch: List[Dict[str, Any]]) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Collate function for UAVid that flattens patch lists into batch dimension.
-
-    Each item in batch has 4 patches → output batch size = 4 * N
-    """
-    all_imgs: List[torch.Tensor] = []
-    all_labels: List[torch.Tensor] = []
-
-    for item in batch:
-        all_imgs.extend(item["img_patches"])
-        all_labels.extend(item["label_patches"])
-
-    batched_imgs = torch.stack(all_imgs, dim=0)  # (4*N, 3, H, W)
-    batched_labels = torch.stack(all_labels, dim=0)  # (4*N, H, W)
-
-    return batched_imgs, batched_labels
+# Mirrors configs/yolo/uavid_train.yaml / configs/train_yolo.yaml's
+# augmentation block — CABiNet and the YOLO26 pipeline respond to the same
+# knobs with (as close as architecturally possible) the same meaning.
+# shear/perspective are omitted: both are disabled (0.0) on the YOLO side
+# and CABiNet has no such transforms, so they already "match" by absence.
+# mosaic/copy_paste are NOT implemented (see class docstring).
+DEFAULT_AUGMENTATION: Dict[str, float] = {
+    "degrees": 10.0,
+    "translate": 0.05,
+    "scale": 0.3,
+    "flipud": 0.2,
+    "fliplr": 0.5,
+    "hsv_h": 0.01,
+    "hsv_s": 0.4,
+    "hsv_v": 0.3,
+    "mixup": 0.1,
+}
 
 
 class UAVid(Dataset):
     """UAVid aerial semantic segmentation dataset.
 
-    Dataset layout (as distributed by UAVid)::
+    Consumes the pre-converted, YOLO-style dataset layout produced by
+    ``src/scripts/convert_uavid_to_yolo.py`` — the SAME converted directory
+    used by the Ultralytics YOLO26 semantic-segmentation pipeline::
 
-        uavid_train/          ← *rootpth*
-        ├── seq1/
-        │   ├── Images/       ← RGB input images  (*.png)
-        │   └── Labels/       ← RGB colour-coded masks (*.png)
-        ├── seq2/
-        │   └── …
-        └── seq16/            ← example validation sequence
+        <rootpth>/
+        ├── images/
+        │   ├── train/   ← RGB PNGs
+        │   ├── val/
+        │   └── test/
+        └── masks/
+            ├── train/   ← single-channel PNGs, pixel value = class ID
+            ├── val/
+            └── test/
 
-    The ``Labels/`` directory contains **3-channel RGB colour-coded masks**
-    where each pixel colour encodes a semantic class (defined in
-    ``UAVid_info.json``).  This loader converts them to single-channel
-    trainId masks on-the-fly via a pre-built lookup table.
-
-    Class mapping (n_classes=8)
-    ---------------------------
-    Clutter is included in the loss (trainId=0) but should be excluded when
-    computing the mIoU metric (``ignoreInEval=True``).
+    Mask pixel values are already final trainIds (0-7; Clutter=0 … MovingCar=7,
+    per the original UAVid paper all 8 classes are valid and none are
+    ignored) — no RGB colour palette or lookup table is needed here, since
+    the conversion step already did that once, up front. Pixel value 255 is
+    reserved for genuinely unrecognized colours encountered during
+    conversion (corrupted/anti-aliased source data), not a real class.
 
     Parameters
     ----------
-    config_file:
-        Path to ``UAVid_info.json`` (colour palette + class metadata).
     ignore_lb:
-        Label value used for pixels not matching any known colour
-        (default 255, passed in from config).
+        Label value treated as "ignore" by the loss/metric (255).
     rootpth:
-        Root directory that directly contains the sequence folders
-        (``uavid_train/`` or equivalent).
+        Root of the *converted* dataset (i.e. ``convert_uavid_to_yolo.py``'s
+        ``--dst``) — NOT the raw UAVid distribution.
     cropsize:
-        ``(H, W)`` crop applied during training augmentation.
+        ``(H, W)`` crop applied during training augmentation via
+        ``RandomCrop``. UAVid source images are not uniform resolution
+        (both 3840x2160 and 4096x2160 occur in practice), so training relies
+        on ``RandomCrop(pad_if_needed=True)`` to handle arbitrary input size
+        directly rather than forcing a canonical resolution up front.
     mode:
-        ``"train"`` or ``"val"``.
-    val_seqs:
-        Sequence folder names that belong to the validation split.
-        All other sequences found in *rootpth* are used for training.
-        Defaults to ``["seq16"]``.
+        ``"train"``, ``"val"``, or ``"test"``.
+    augmentation:
+        Optional dict overriding any subset of ``DEFAULT_AUGMENTATION``
+        (degrees/translate/scale/flipud/fliplr/hsv_h/hsv_s/hsv_v/mixup),
+        mirroring the YOLO26 pipeline's ``augmentation:`` config block
+        (``configs/train_yolo.yaml``) so both pipelines can be tuned the
+        same way. ``mosaic``/``copy_paste`` are intentionally not
+        supported: both are multi-image augmentations requiring dataset-
+        level access to other samples, and ``copy_paste`` in particular has
+        no well-defined translation to pure semantic segmentation (no
+        instance boundaries to paste). ``mixup`` *is* implemented, but with
+        a necessary simplification: two images are alpha-blended
+        continuously (``Beta(32, 32)``, matching Ultralytics exactly), but
+        the two label maps cannot be blended the same way — there's no
+        meaningful "average" of two class-ID masks — so the hard label is
+        taken from whichever image contributed the larger blend weight.
+
+    Note on validation batching
+    ----------------------------
+    In ``val``/``test`` mode no crop is applied (full-resolution images are
+    evaluated via sliding-window inference), so a `DataLoader` batching more
+    than one sample at a time will fail to stack mismatched image sizes.
+    Callers must use ``batch_size=1`` for non-train modes.
     """
 
     def __init__(
         self,
-        config_file: str,
         ignore_lb: int,
         rootpth: str,
         cropsize: Tuple[int, int],
         mode: str = "train",
-        val_seqs: Optional[List[str]] = None,
+        augmentation: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__()
         self.mode = mode
         self.ignore_lb = ignore_lb
         self.rootpth = rootpth
         self.cropsize = tuple(cropsize)
-        self.val_seqs: set = set(val_seqs if val_seqs is not None else ["seq16"])
+        self.aug = {**DEFAULT_AUGMENTATION, **(augmentation or {})}
 
-        if self.mode not in ("train", "val"):
-            raise ValueError(f"Mode '{mode}' not supported. Choose 'train' or 'val'.")
+        if self.mode not in ("train", "val", "test"):
+            raise ValueError(
+                f"Mode '{mode}' not supported. Choose 'train', 'val', or 'test'."
+            )
         if not osp.exists(rootpth):
             raise FileNotFoundError(f"Dataset root does not exist: {rootpth}")
 
-        # --- Build RGB → trainId lookup table from colour palette ----------
-        with open(config_file) as f:
-            labels_info: List[Dict[str, Any]] = json.load(f)
-        self._trainid_lut = self._build_trainid_lut(labels_info, ignore_lb)
-        print(f"[INFO] Loaded {len(labels_info)} classes from {config_file}")
+        img_dir = osp.join(rootpth, "images", mode)
+        label_dir = osp.join(rootpth, "masks", mode)
+        if not osp.exists(img_dir):
+            raise FileNotFoundError(f"Image directory not found: {img_dir}")
+        if not osp.exists(label_dir):
+            raise FileNotFoundError(f"Mask directory not found: {label_dir}")
 
-        # --- Discover sequences for this split ------------------------------
-        all_seqs = sorted(
-            s for s in os.listdir(rootpth) if osp.isdir(osp.join(rootpth, s))
-        )
-        if mode == "train":
-            use_seqs = [s for s in all_seqs if s not in self.val_seqs]
-        else:
-            use_seqs = [s for s in all_seqs if s in self.val_seqs]
+        # --- Load image and label paths ------------------------------------
+        self.imnames = []
+        self.imgs = {}
+        self.labels = {}
 
-        if not use_seqs:
-            raise FileNotFoundError(
-                f"No sequences found for split='{mode}' in {rootpth}. "
-                f"val_seqs={self.val_seqs}, available={all_seqs}"
-            )
+        imgnames = sorted(fn for fn in os.listdir(img_dir) if fn.endswith(".png"))
+        for fn in imgnames:
+            stem = osp.splitext(fn)[0]
+            self.imgs[stem] = osp.join(img_dir, fn)
+            label_path = osp.join(label_dir, fn)
+            if osp.exists(label_path):
+                self.labels[stem] = label_path
+            self.imnames.append(stem)
 
-        # --- Load image and label paths; key = "{seq}/{stem}" ---------------
-        # Using "{seq}/{stem}" prevents key collisions when the same filename
-        # (e.g. "000001.png") appears in multiple sequence folders.
-        self.imgs: Dict[str, str] = {}
-        self.labels: Dict[str, str] = {}
-        imgnames: List[str] = []
-
-        for seq in use_seqs:
-            img_dir = osp.join(rootpth, seq, "Images")
-            label_dir = osp.join(rootpth, seq, "Labels")
-            if not osp.exists(img_dir):
-                print(f"[WARN] Images/ not found for sequence {seq}, skipping.")
-                continue
-            for fn in sorted(os.listdir(img_dir)):
-                if not fn.endswith(".png"):
-                    continue
-                stem = osp.splitext(fn)[0]
-                key = f"{seq}/{stem}"
-                self.imgs[key] = osp.join(img_dir, fn)
-                label_path = osp.join(label_dir, fn)
-                if osp.exists(label_path):
-                    self.labels[key] = label_path
-                imgnames.append(key)
-
-        # Drop any image that has no matching label
-        missing = set(imgnames) - set(self.labels.keys())
+        # Drop any image that has no matching mask
+        missing = [name for name in self.imnames if name not in self.labels]
         if missing:
-            print(
-                f"[WARN] {len(missing)} image(s) have no Labels/ mask "
+            warnings.warn(
+                f"{len(missing)} image(s) have no matching mask in {label_dir} "
                 f"and will be skipped: {sorted(missing)[:5]}…"
             )
-        self.imnames = [k for k in imgnames if k in self.labels]
+        self.imnames = [name for name in self.imnames if name in self.labels]
+
+        if len(self.imnames) == 0:
+            raise RuntimeError(
+                f"No valid image-mask pairs found for mode='{mode}' in {rootpth}."
+            )
+
         self.len = len(self.imnames)
 
-        # --- Image normalisation -------------------------------------------------
+        # --- Image normalisation --------------------------------------------------
+        # Mean/std computed from the UAVid train set (see
+        # src/datasets/compute_uavid_stats.py) — distinct from ImageNet stats.
         self.to_tensor = transforms.Compose(
             [
                 transforms.ToTensor(),
@@ -174,18 +182,36 @@ class UAVid(Dataset):
         )
 
         # --- Training augmentation (Geometric → Photometric → Regularisation) ---
+        # Geometric/photometric parameters mirror the YOLO26 pipeline's
+        # augmentation config (see DEFAULT_AUGMENTATION above); RandomGamma/
+        # RandomNoise/RandomCutout are CABiNet-specific extras layered on
+        # top, not part of the YOLO26 alignment.
+        degrees = float(self.aug["degrees"])
+        scale = float(self.aug["scale"])
         self.trans_train = (
             Compose(
                 [
-                    RandomHorizontalFlip(p=0.2),
-                    RandomRotate(degrees=(-10, 10), ignore_label=self.ignore_lb),
-                    RandomScale((0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
+                    RandomHorizontalFlip(p=float(self.aug["fliplr"])),
+                    RandomVerticalFlip(p=float(self.aug["flipud"])),
+                    RandomTranslate(
+                        translate=float(self.aug["translate"]),
+                        ignore_label=self.ignore_lb,
+                    ),
+                    RandomRotate(
+                        degrees=(-degrees, degrees), ignore_label=self.ignore_lb
+                    ),
+                    RandomScale((1.0 - scale, 1.0 + scale), continuous=True),
                     RandomCrop(
                         size=self.cropsize,
                         pad_if_needed=True,
                         ignore_label=self.ignore_lb,
                     ),
-                    RandomColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+                    RandomHSV(
+                        hgain=float(self.aug["hsv_h"]),
+                        sgain=float(self.aug["hsv_s"]),
+                        vgain=float(self.aug["hsv_v"]),
+                    ),
+                    RandomColorJitter(contrast=0.5),
                     RandomGamma(gamma_range=(0.8, 1.2), p=0.3),
                     RandomNoise(mode="gaussian", sigma=0.03, p=0.3),
                     RandomCutout(p=0.3, size=64),
@@ -194,94 +220,48 @@ class UAVid(Dataset):
             if mode == "train"
             else None
         )
+        self.mixup_p = float(self.aug["mixup"]) if mode == "train" else 0.0
 
         print(
-            f"[INFO] UAVid dataset loaded: {self.len} samples ({mode}) "
-            f"from {len(use_seqs)} sequence(s)"
+            f"[INFO] UAVid dataset loaded: {self.len} samples ({mode}) from {img_dir}"
         )
 
-    # -----------------------------------------------------------------------
-    # Helpers
-    # -----------------------------------------------------------------------
+    def _load_one(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Load, augment, and tensorize a single sample (no MixUp)."""
+        stem = self.imnames[idx]
+        img = Image.open(self.imgs[stem]).convert("RGB")
+        label = Image.open(self.labels[stem])
+        if label.mode != "L":
+            label = label.convert("L")
 
-    @staticmethod
-    def _build_trainid_lut(
-        labels_info: List[Dict[str, Any]], ignore_lb: int
-    ) -> np.ndarray:
-        """Build a (256, 256, 256) uint8 LUT mapping RGB colour → trainId.
+        if self.mode == "train" and self.trans_train is not None:
+            im_lb = self.trans_train({"im": img, "lb": label})
+            img, label = im_lb["im"], im_lb["lb"]
 
-        Known colours are mapped to their ``trainId`` value (0-7 for UAVid).
-        Unknown colours default to *ignore_lb* (255).
+        img_t = self.to_tensor(img)
+        label_np = np.array(label, dtype=np.int64)  # (H, W), already final class IDs
+        label_t = torch.from_numpy(label_np).long()
+        return img_t, label_t
 
-        This is distinct from the YOLO LUT in ``convert_uavid_to_yolo.py``
-        which maps Clutter → 255; here Clutter maps to its trainId (0) so
-        that it is included in the cross-entropy loss while still being
-        excluded from the mIoU metric during evaluation.
-        """
-        lut = np.full((256, 256, 256), ignore_lb, dtype=np.uint8)
-        for cls in labels_info:
-            r, g, b = cls["color"]
-            lut[r, g, b] = cls["trainId"]
-        return lut
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        img, label = self._load_one(idx)
 
-    def _rgb_label_to_trainid(self, label_rgb: Image.Image) -> Image.Image:
-        """Convert a 3-channel RGB label PIL image to a single-channel trainId image."""
-        arr = np.array(label_rgb, dtype=np.uint8)  # (H, W, 3)
-        trainid = self._trainid_lut[arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]]  # (H, W)
-        return Image.fromarray(trainid)  # mode='L', uint8
+        if (
+            self.mode == "train"
+            and self.mixup_p > 0
+            and np.random.random() < self.mixup_p
+        ):
+            other_idx = int(np.random.randint(0, self.len))
+            img2, label2 = self._load_one(other_idx)
+            # Both samples went through the same RandomCrop, so shapes match.
+            r = float(np.random.beta(32.0, 32.0))  # matches Ultralytics' MixUp exactly
+            img = img * r + img2 * (1.0 - r)
+            # Class-ID masks can't be blended the same way (no meaningful
+            # "average" of two class indices) — take the label from
+            # whichever image contributed the larger share of the blend.
+            label = label if r >= 0.5 else label2
 
-    # -----------------------------------------------------------------------
-    # Dataset interface
-    # -----------------------------------------------------------------------
-
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        key = self.imnames[idx]
-        img = Image.open(self.imgs[key]).convert("RGB")  # (W, H) = 3840×2160
-        label_rgb = Image.open(self.labels[key]).convert("RGB")  # RGB colour mask
-
-        # Convert RGB colour mask → single-channel trainId mask.
-        # This must happen BEFORE augmentation so that the pipeline receives
-        # a mode-L image (values 0-7 or ignore_lb), not a 3-channel array.
-        label = self._rgb_label_to_trainid(label_rgb)  # mode='L'
-
-        w, h = img.size  # 3840, 2160 for standard UAVid
-        if w != 3840 or h != 2160:
-            img = img.resize((3840, 2160), Image.BILINEAR)
-            label = label.resize((3840, 2160), Image.NEAREST)
-            w, h = 3840, 2160
-
-        half_w, half_h = w // 2, h // 2  # 1920, 1080
-
-        img_patches: List[torch.Tensor] = []
-        label_patches: List[torch.Tensor] = []
-
-        for left, upper, right, lower in [
-            (0, 0, half_w, half_h),  # top-left
-            (half_w, 0, w, half_h),  # top-right
-            (0, half_h, half_w, h),  # bottom-left
-            (half_w, half_h, w, h),  # bottom-right
-        ]:
-            img_patch = img.crop((left, upper, right, lower))
-            label_patch = label.crop((left, upper, right, lower))
-
-            if self.mode == "train" and self.trans_train is not None:
-                im_lb = {"im": img_patch, "lb": label_patch}
-                try:
-                    im_lb = self.trans_train(im_lb)
-                    img_patch, label_patch = im_lb["im"], im_lb["lb"]
-                except Exception as exc:
-                    print(f"[WARN] Augmentation failed on {key}: {exc}")
-
-            img_patches.append(self.to_tensor(img_patch))
-            label_np = np.array(label_patch, dtype=np.int64)
-            label_patches.append(torch.from_numpy(label_np).long())
-
-        return {
-            "img_patches": img_patches,
-            "label_patches": label_patches,
-            "name": key,
-            "original_size": (h, w),
-        }
+        return img, label
 
     def __len__(self) -> int:
         return self.len
@@ -293,26 +273,27 @@ class UAVid(Dataset):
 if __name__ == "__main__":
     import sys
 
-    rootpth = os.environ.get("UAVID_TRAIN_ROOT", "")
-    config_file = "configs/UAVid_info.json"
+    rootpth = os.environ.get("UAVID_YOLO_ROOT", "")
     if not rootpth:
-        print("Set UAVID_TRAIN_ROOT=/path/to/uavid_train and re-run.")
+        print(
+            "Set UAVID_YOLO_ROOT=/path/to/converted/uavid_yolo and re-run "
+            "(this must be the OUTPUT of convert_uavid_to_yolo.py, not raw UAVid data)."
+        )
         sys.exit(0)
 
-    for split in ("train", "val"):
-        ds = UAVid(
-            config_file=config_file,
-            ignore_lb=255,
-            rootpth=rootpth,
-            cropsize=(1024, 1024),
-            mode=split,
-            val_seqs=["seq16"],
-        )
-        print(f"{split}: {len(ds)} samples")
-        if len(ds) == 0:
+    for split in ("train", "val", "test"):
+        try:
+            ds = UAVid(
+                ignore_lb=255,
+                rootpth=rootpth,
+                cropsize=(1024, 1024),
+                mode=split,
+            )
+        except (FileNotFoundError, RuntimeError) as exc:
+            print(f"{split}: skipped ({exc})")
             continue
-        item = ds[0]
-        for lb in item["label_patches"]:
-            unique = torch.unique(lb[lb != 255])
-            print(f"  unique trainIds in first item: {sorted(unique.tolist())}")
-        break
+        print(f"{split}: {len(ds)} samples")
+        img, lb = ds[0]
+        unique = torch.unique(lb[lb != 255])
+        print(f"  img shape: {tuple(img.shape)}, label shape: {tuple(lb.shape)}")
+        print(f"  unique class IDs in first item: {sorted(unique.tolist())}")

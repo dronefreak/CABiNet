@@ -11,14 +11,18 @@ from src.utils.logger import RichConsoleManager
 
 logger = logging.getLogger(__name__)
 
-# YOLO model variants that support semantic segmentation via Ultralytics
-SUPPORTED_SEG_MODELS = {
-    # YOLOv8 seg variants
-    "yolov8n-seg", "yolov8s-seg", "yolov8m-seg", "yolov8l-seg", "yolov8x-seg",
-    # YOLOv9 seg variants (only c and e support seg)
-    "yolov9c-seg", "yolov9e-seg",
-    # YOLO11 seg variants (note: no 'v' in the name)
-    "yolo11n-seg", "yolo11s-seg", "yolo11m-seg", "yolo11l-seg", "yolo11x-seg",
+# Repo root: src/scripts/train_yolo.py -> src/scripts -> src -> <repo root>
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# YOLO model variants that support the dedicated 'semantic' task via Ultralytics.
+# Only the YOLO26 family ships '-sem' checkpoints — the '-seg' family (yolov8/9/11)
+# is instance segmentation ('segment' task) and does NOT apply here.
+SUPPORTED_SEMANTIC_MODELS = {
+    "yolo26n-sem",
+    "yolo26s-sem",
+    "yolo26m-sem",
+    "yolo26l-sem",
+    "yolo26x-sem",
 }
 
 
@@ -41,12 +45,30 @@ def _resolve_dataset_path(config_file: str) -> Path:
     return p.resolve()
 
 
+def _resolve_experiments_path(experiments_path: str) -> Path:
+    """Resolve experiments_path to an absolute path anchored to this repo.
+
+    Two independent footguns otherwise apply to a relative path:
+      1. Ultralytics' get_save_dir() silently prefixes any *relative*
+         project= path with the global 'runs_dir' from
+         ~/.config/Ultralytics/settings.json — a machine-wide setting that
+         may point at a completely different project (this is what actually
+         happened: it was left pointing at another repo from earlier work).
+      2. A relative path is also ambiguous with respect to whatever
+         directory the shell happened to be in at invocation time.
+    Anchoring to the repo root sidesteps both — output always lands under
+    this repo regardless of global Ultralytics settings or launch CWD.
+    """
+    p = Path(experiments_path)
+    return p if p.is_absolute() else (REPO_ROOT / p)
+
+
 def _resolve_resume_weights(cfg: DictConfig) -> str | None:
     """Return the path to last.pt when resume=True, or None otherwise."""
     if not cfg.training_config.get("resume", False):
         return None
     run_dir = (
-        Path(cfg.training_config.experiments_path)
+        _resolve_experiments_path(cfg.training_config.experiments_path)
         / cfg.model.run_name
         / "weights"
         / "last.pt"
@@ -68,10 +90,7 @@ def _build_train_kwargs(cfg: DictConfig, dataset_path: Path) -> dict:
     kwargs: dict = {
         # Task & data
         "data": str(dataset_path),
-        "task": "segment",
-        # Segmentation-specific: must be False for semantic (class-per-pixel) mode
-        "overlap_mask": bool(tc.get("overlap_mask", False)),
-        "mask_ratio": int(tc.get("mask_ratio", 1)),
+        "task": "semantic",
         # Schedule
         "epochs": int(tc.epochs),
         "batch": int(tc.batch_size),
@@ -93,7 +112,7 @@ def _build_train_kwargs(cfg: DictConfig, dataset_path: Path) -> dict:
         # Class imbalance
         "cls_pw": float(tc.get("cls_pw", 0.5)),
         # Output & checkpointing
-        "project": str(tc.experiments_path),
+        "project": str(_resolve_experiments_path(tc.experiments_path)),
         "name": str(cfg.model.run_name),
         "exist_ok": bool(tc.get("exist_ok", False)),
         "resume": bool(tc.get("resume", False)),
@@ -111,10 +130,21 @@ def _build_train_kwargs(cfg: DictConfig, dataset_path: Path) -> dict:
 
     # Flatten augmentation sub-config into top-level kwargs
     aug_keys = {
-        "degrees", "translate", "scale", "shear", "perspective",
-        "flipud", "fliplr",
-        "hsv_h", "hsv_s", "hsv_v",
-        "mosaic", "mixup", "copy_paste", "copy_paste_mode", "close_mosaic",
+        "degrees",
+        "translate",
+        "scale",
+        "shear",
+        "perspective",
+        "flipud",
+        "fliplr",
+        "hsv_h",
+        "hsv_s",
+        "hsv_v",
+        "mosaic",
+        "mixup",
+        "copy_paste",
+        "copy_paste_mode",
+        "close_mosaic",
         "multi_scale",
     }
     for key in aug_keys:
@@ -130,8 +160,7 @@ def _build_val_kwargs(cfg: DictConfig, dataset_path: Path, weights: str) -> dict
     vc = cfg.validation_config
     return {
         "data": str(dataset_path),
-        "task": "segment",
-        "overlap_mask": bool(vc.get("overlap_mask", False)),
+        "task": "semantic",
         "imgsz": int(cfg.training_config.imgsz),
         "batch": int(vc.get("batch_size", 1)),
         "device": cfg.runtime.get("device", 0),
@@ -161,16 +190,19 @@ def main(cfg: DictConfig) -> None:
     model_name: str = cfg.model.model_name
     base_name = model_name.replace(".pt", "").replace(".yaml", "")
 
-    if base_name not in SUPPORTED_SEG_MODELS:
+    if base_name not in SUPPORTED_SEMANTIC_MODELS:
         logger.warning(
-            "Model '%s' is not in the known supported-segmentation list %s. "
-            "Proceeding anyway — verify overlap_mask=False is respected.",
+            "Model '%s' is not in the known supported-semantic-segmentation list %s. "
+            "Proceeding anyway — only the yolo26*-sem family is verified to work "
+            "with task='semantic'.",
             base_name,
-            SUPPORTED_SEG_MODELS,
+            SUPPORTED_SEMANTIC_MODELS,
         )
 
     dataset_path = _resolve_dataset_path(cfg.dataset.config_file)
     console.print(f"Dataset config: {dataset_path}", style="info")
+
+    experiments_path = _resolve_experiments_path(cfg.training_config.experiments_path)
 
     if mode == "train":
         resume_weights = _resolve_resume_weights(cfg)
@@ -188,18 +220,16 @@ def main(cfg: DictConfig) -> None:
         if results is not None:
             console.print(
                 f"Training complete. Best weights: "
-                f"{cfg.training_config.experiments_path}/{cfg.model.run_name}/weights/best.pt",
+                f"{experiments_path / cfg.model.run_name / 'weights' / 'best.pt'}",
                 style="info",
             )
 
     elif mode == "val":
         weights = cfg.validation_config.get("weights")
         if not weights:
-            weights = (
-                f"{cfg.training_config.experiments_path}"
-                f"/{cfg.model.run_name}/weights/best.pt"
-            )
-        weights_path = Path(weights)
+            weights_path = experiments_path / cfg.model.run_name / "weights" / "best.pt"
+        else:
+            weights_path = Path(weights)
         if not weights_path.exists():
             raise FileNotFoundError(
                 f"Weights not found: {weights_path}\n"
@@ -212,7 +242,8 @@ def main(cfg: DictConfig) -> None:
 
         results = model.val(**val_kwargs)
         if results is not None:
-            console.print(f"mIoU (mask): {results.seg.map:.4f}", style="info")
+            console.print(f"mIoU: {results.miou:.4f}", style="info")
+            console.print(f"Pixel accuracy: {results.pixel_accuracy:.4f}", style="info")
 
     else:
         raise ValueError(

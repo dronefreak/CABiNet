@@ -6,62 +6,64 @@ UAVid original format (Labels/ directory)
 Each ground-truth PNG is a 3-channel RGB image where every pixel's colour
 encodes a semantic class (see UAVid_info.json). Example:
   [128,  0,  0]  → Building
-  [  0,  0,  0]  → Clutter  (ignored in evaluation)
+  [  0,  0,  0]  → Clutter  (a valid class — see below)
 
 UAVid directory layout (as distributed)
 -----------------------------------------
-Both train and validation sequences live under the same root folder::
+train/val/test sequences each live under their own sub-folder of one root::
 
-    uavid_train/            ← *--src* argument
-    ├── seq1/
-    │   ├── Images/         ← RGB input images
-    │   └── Labels/         ← RGB colour-coded masks  ← what this script reads
-    ├── seq2/ … seq15/
-    └── seq16/              ← validation sequences (named via --val-seqs)
+    uavid/                  ← *--src* argument
+    ├── train/
+    │   ├── seq1/
+    │   │   ├── Images/     ← RGB input images
+    │   │   └── Labels/     ← RGB colour-coded masks  ← what this script reads
+    │   └── seq2/ … /
+    ├── val/
+    │   └── seq.../
+    └── test/
+        └── seq.../
+
+All three splits (train, val, test) are converted identically — masks and
+image references both — as long as their ``Labels/`` directories are
+present. A split whose directory is missing under *--src* is skipped.
 
 YOLO semantic-segmentation format
 ----------------------------------
 Each mask is a *single-channel* (mode-"L") PNG where:
   pixel value = class index  (0 … N-1)
-  pixel value = 255          → ignored during training / evaluation
+  pixel value = 255          → reserved for pixels whose colour does not match
+                                any known class (corrupted/anti-aliased data);
+                                does NOT apply to any defined UAVid class
 
-Mapping used by this script (YOLO only — NOT the same as CABiNet trainIds)
+Mapping used by this script (identical to CABiNet's trainIds)
 ---------------------------------------------------------------------------
-  Clutter  (ignoreInEval=true)  → 255  (YOLO ignore label)
-  Building                      → 0
-  Road                          → 1
-  Static Car                    → 2
-  Tree                          → 3
-  Vegetation                    → 4
-  Human                         → 5
-  Moving Car                    → 6
+  Clutter                        → 0
+  Building                       → 1
+  Road                           → 2
+  Static Car                     → 3
+  Tree                           → 4
+  Vegetation                     → 5
+  Human                          → 6
+  Moving Car                     → 7
 
-Note: in the CABiNet training pipeline (``uavid.py``) Clutter maps to
-trainId=0 and is included in the loss.  The YOLO mapping here drops Clutter
-entirely (→ 255) which gives 7 active classes.
+Per the original UAVid paper, Clutter is a valid class and is never ignored —
+not in the loss, not in the mIoU metric, and not in this conversion. This
+mirrors the CABiNet training pipeline (``uavid.py``), where Clutter maps to
+trainId=0 and is included in both training and evaluation. All 8 classes are
+active; no class is mapped to the YOLO ignore label.
 
 Usage
 ------
-  # Convert all sequences; val = seq16, train = everything else
+  # Convert train/val/test (any split missing under --src is skipped)
   python src/scripts/convert_uavid_to_yolo.py \\
-      --src  /data/uavid_train \\
+      --src  /data/uavid \\
       --dst  /data/uavid_yolo \\
       --info configs/UAVid_info.json \\
-      --val-seqs seq16 \\
-      --workers 4
-
-  # Explicit train list
-  python src/scripts/convert_uavid_to_yolo.py \\
-      --src  /data/uavid_train \\
-      --dst  /data/uavid_yolo \\
-      --train-seqs seq1 seq2 seq3 seq4 seq5 \\
-      --val-seqs   seq16 \\
-      --workers 4
+      --workers 8
 
   # Dry-run to check counts before writing
   python src/scripts/convert_uavid_to_yolo.py \\
-      --src /data/uavid_train --dst /tmp/out \\
-      --val-seqs seq16 --dry-run
+      --src /data/uavid --dst /tmp/out --dry-run
 
 Directory layout produced
 --------------------------
@@ -69,9 +71,11 @@ Directory layout produced
     images/
       train/   ← symlinks (or copies with --copy-images) to original RGB PNGs
       val/
+      test/
     masks/
       train/   ← converted single-channel PNGs  (seq_{stem}.png)
       val/
+      test/
 """
 
 from __future__ import annotations
@@ -98,9 +102,12 @@ IGNORE_LABEL: int = 255
 def build_colour_map(labels_info: list[dict]) -> Dict[Tuple[int, int, int], int]:
     """Return mapping  RGB tuple → YOLO class ID.
 
-    Classes with ``ignoreInEval=True`` are mapped to IGNORE_LABEL (255).
-    Remaining classes are assigned consecutive IDs (0-based) ordered by
-    their original ``trainId`` value.
+    Classes with ``ignoreInEval=True`` are mapped to IGNORE_LABEL (255); per
+    the UAVid paper, no class (including Clutter) is marked ignored in
+    ``UAVid_info.json``, so in practice all classes are assigned consecutive
+    IDs (0-based) ordered by their original ``trainId`` value, and
+    IGNORE_LABEL is only ever used as the LUT default for unrecognized
+    colours (see :func:`build_lut`).
     """
     eval_classes = sorted(
         [c for c in labels_info if not c["ignoreInEval"]], key=lambda c: c["trainId"]
@@ -136,9 +143,9 @@ def build_trainid_lut(
 ) -> np.ndarray:
     """Build a (256, 256, 256) uint8 LUT mapping RGB colour → CABiNet trainId.
 
-    Unlike :func:`build_lut` (which uses the YOLO 0-based mapping and sends
-    Clutter to 255), this function preserves the original ``trainId`` values
-    from ``UAVid_info.json`` (Clutter=0, Building=1, …, MovingCar=7).
+    Preserves the original ``trainId`` values from ``UAVid_info.json``
+    (Clutter=0, Building=1, …, MovingCar=7) — numerically identical to
+    :func:`build_lut` today, since no class is marked ``ignoreInEval``.
     Unknown colours default to *ignore_lb* (255).
 
     This LUT is used by ``uavid.py`` for on-the-fly conversion during
@@ -358,8 +365,10 @@ def _parse_args() -> argparse.Namespace:
         required=True,
         type=Path,
         help=(
-            "Root directory containing sequence sub-folders "
-            "(e.g. /data/uavid_train — contains seq1/, seq2/, …)"
+            "Root directory containing train/, val/, and/or test/ "
+            "sub-folders, each directly containing sequence folders "
+            "(e.g. /data/uavid/train/seq1/, /data/uavid/val/seq16/, …). "
+            "A split sub-folder that doesn't exist is skipped."
         ),
     )
     p.add_argument(
@@ -373,26 +382,6 @@ def _parse_args() -> argparse.Namespace:
         default="configs/UAVid_info.json",
         type=Path,
         help="Path to UAVid_info.json (label colour palette)",
-    )
-    p.add_argument(
-        "--val-seqs",
-        nargs="+",
-        default=["seq16"],
-        metavar="SEQ",
-        help=(
-            "Sequence folder name(s) to treat as the validation split. "
-            "All other sequences in --src are treated as training."
-        ),
-    )
-    p.add_argument(
-        "--train-seqs",
-        nargs="+",
-        default=None,
-        metavar="SEQ",
-        help=(
-            "Explicit list of training sequences. "
-            "If omitted, all sequences not in --val-seqs are used."
-        ),
     )
     p.add_argument(
         "--workers",
@@ -427,29 +416,24 @@ def main() -> None:
     print(f"[INFO] YOLO class mapping ({len(class_names)} classes):")
     for yolo_id, name in class_names.items():
         print(f"         {yolo_id:2d} → {name}")
-    print(f"         {IGNORE_LABEL} → <ignore> (Clutter + unlabelled)")
+    print(f"         {IGNORE_LABEL} → <ignore> (unrecognized colours only)")
+    print(f"\n[INFO] Source: {args.src}")
 
-    # Discover all sequences in src
-    all_seqs = discover_sequences(args.src)
-    val_seqs = args.val_seqs
-    train_seqs: List[str] = (
-        args.train_seqs
-        if args.train_seqs is not None
-        else [s for s in all_seqs if s not in set(val_seqs)]
-    )
-
-    print(f"\n[INFO] Source     : {args.src}")
-    print(f"[INFO] Train seqs : {train_seqs}")
-    print(f"[INFO] Val seqs   : {val_seqs}")
-
-    splits = [("train", train_seqs), ("val", val_seqs)]
     total = 0
-    for split_name, seqs in splits:
-        if not seqs:
-            print(f"[WARN] No sequences for split '{split_name}', skipping.")
+    for split_name in ("train", "val", "test"):
+        split_root = args.src / split_name
+        if not split_root.exists():
+            print(f"[WARN] Missing split directory, skipping: {split_root}")
             continue
+
+        seqs = discover_sequences(split_root)
+        if not seqs:
+            print(f"[WARN] No sequences found under {split_root}, skipping.")
+            continue
+
+        print(f"[INFO] {split_name}: {len(seqs)} sequence(s) — {seqs}")
         n = convert_sequences(
-            src_root=args.src,
+            src_root=split_root,
             dst_root=args.dst,
             split=split_name,
             seqs=seqs,
@@ -467,7 +451,7 @@ def main() -> None:
         print(f"       Output: {args.dst}")
         print(
             f"       Next: set UAVID_YOLO_ROOT={args.dst} "
-            "and run: yolo segment train cfg=configs/yolo/uavid_train.yaml"
+            "and run: yolo semantic train cfg=configs/yolo/uavid_train.yaml"
         )
 
 

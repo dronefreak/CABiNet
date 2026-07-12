@@ -23,16 +23,33 @@ training_config:
   # Setting it here is optional — if absent, train.py derives it automatically.
   # If set, it overrides the derived value (useful for multi-phase schedules).
   max_iterations: ~ # null → auto-computed from epochs/accum_steps
-  class_balancing: true
+
+  # Class imbalance (UAVid: Human/MovingCar are rare). Weights are computed
+  # at startup from a sample of the training set via the ENet inverse-log
+  # formula (1 / ln(1.02 + p)) ** cls_pw — same formula and semantics as the
+  # YOLO26 pipeline's cls_pw (configs/train_yolo.yaml), so both pipelines
+  # respond to this knob the same way.
+  # 0.0 = disabled (uniform), 1.0 = full inverse-frequency weighting
+  cls_pw: 0.5
+
   max_grad_norm: 1.0 # Gradient clipping threshold; set to null/0 to disable
   log_iter: 20 # Renamed from 'msg_iterations' — clearer intent
   experiments_path: experiments/cabinet_experiments_large_1024x1024
-  model_save_name: cabinet_citys_large_1024x1024.pth
+  model_save_name: cabinet.pth
   resume: false # Set to true to resume from checkpoint_last.pth in experiments_path
+
+  # Exponential moving average of model weights. best/final .pth files and the
+  # per-epoch mIoU eval all use the EMA model, not the raw training weights
+  # (matches the YOLO26 pipeline's "best.pt/last.pt are EMA-averaged" convention).
+  ema_decay: 0.9999 # target decay; ramps up from ~0 over the first ema_tau updates
+  ema_tau: 2000 # decay ramp time constant, in optimizer steps
+
+  # Early stopping on mIoU (evaluated on EMA weights). 0 = disabled.
+  patience: 30
 
 # Validation Configuration
 validation_config:
-  batch_size: 2
+  batch_size: 1
   num_workers: 8 # Explicitly set (can be lower than training)
   eval_scales: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75]
   flip: true

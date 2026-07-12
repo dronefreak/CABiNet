@@ -1,10 +1,10 @@
 """Tests for src/scripts/convert_uavid_to_yolo.py
 
 Covers:
-  - build_colour_map: correct class IDs and ignore label for Clutter
+  - build_colour_map: correct class IDs; Clutter is valid (id 0), never ignored
   - build_lut: LUT entries match colour_map
-  - build_trainid_lut: Clutter→0 (CABiNet trainId), unknown→255
-  - convert_mask: pixel-level correctness, clutter→255, unknown colour→255
+  - build_trainid_lut: Clutter→0 (CABiNet trainId), unknown colour→255
+  - convert_mask: pixel-level correctness, clutter→0, unknown colour→255
   - get_yolo_class_names: ordering and count
   - discover_sequences: finds sequence dirs with Images/ sub-dir
   - iter_sequences: correct enumeration, error on missing seq
@@ -46,7 +46,7 @@ MINIMAL_INFO = [
         "category": "void",
         "catid": 0,
         "name": "Clutter",
-        "ignoreInEval": True,
+        "ignoreInEval": False,
         "id": 0,
         "color": [0, 0, 0],
         "trainId": 0,
@@ -152,21 +152,22 @@ def info_json_path(tmp_path) -> Path:
 
 
 class TestBuildColourMap:
-    def test_clutter_maps_to_ignore(self, colour_map):
-        """Clutter (ignoreInEval=True) must map to IGNORE_LABEL (255)."""
-        assert colour_map[(0, 0, 0)] == IGNORE_LABEL
+    def test_clutter_maps_to_zero(self, colour_map):
+        """Clutter is a valid class (ignoreInEval=False) and is the first eval
+        class (trainId 0); should get YOLO id 0, never IGNORE_LABEL."""
+        assert colour_map[(0, 0, 0)] == 0
 
-    def test_building_maps_to_zero(self, colour_map):
-        """Building is the first eval class and should get YOLO id 0."""
-        assert colour_map[(128, 0, 0)] == 0
+    def test_building_maps_to_one(self, colour_map):
+        """Building is the second eval class and should get YOLO id 1."""
+        assert colour_map[(128, 0, 0)] == 1
 
-    def test_road_maps_to_one(self, colour_map):
-        """Road is the second eval class; id 1."""
-        assert colour_map[(128, 64, 128)] == 1
+    def test_road_maps_to_two(self, colour_map):
+        """Road is the third eval class; id 2."""
+        assert colour_map[(128, 64, 128)] == 2
 
-    def test_moving_car_maps_to_six(self, colour_map):
-        """Moving Car is the last eval class (trainId 7); should get id 6."""
-        assert colour_map[(64, 0, 128)] == 6
+    def test_moving_car_maps_to_seven(self, colour_map):
+        """Moving Car is the last eval class (trainId 7); should get id 7."""
+        assert colour_map[(64, 0, 128)] == 7
 
     def test_all_eval_classes_have_unique_ids(self, colour_map):
         """No two eval colours should share the same YOLO class id."""
@@ -174,9 +175,13 @@ class TestBuildColourMap:
         assert len(ids) == len(set(ids))
 
     def test_number_of_eval_classes(self, colour_map):
-        """7 eval classes (all 8 minus Clutter)."""
+        """8 eval classes — all UAVid classes are valid, including Clutter."""
         eval_ids = [v for v in colour_map.values() if v != IGNORE_LABEL]
-        assert len(eval_ids) == 7
+        assert len(eval_ids) == 8
+
+    def test_no_class_maps_to_ignore(self, colour_map):
+        """Per the UAVid paper, no defined class (including Clutter) is ignored."""
+        assert IGNORE_LABEL not in colour_map.values()
 
 
 # ---------------------------------------------------------------------------
@@ -192,13 +197,13 @@ class TestBuildLUT:
         assert lut.dtype == np.uint8
 
     def test_lut_clutter_entry(self, lut):
-        assert lut[0, 0, 0] == IGNORE_LABEL
+        assert lut[0, 0, 0] == 0
 
     def test_lut_building_entry(self, lut):
-        assert lut[128, 0, 0] == 0
+        assert lut[128, 0, 0] == 1
 
     def test_lut_road_entry(self, lut):
-        assert lut[128, 64, 128] == 1
+        assert lut[128, 64, 128] == 2
 
     def test_unknown_colour_defaults_to_ignore(self, lut):
         """Any colour not in the palette must default to 255."""
@@ -224,7 +229,7 @@ class TestConvertMask:
             arr[:, col_start:col_end] = colour
         return Image.fromarray(arr)
 
-    def test_building_pixels_become_zero(self, lut, tmp_path):
+    def test_building_pixels_become_one(self, lut, tmp_path):
         img = self._make_rgb_mask([(128, 0, 0)])
         src = tmp_path / "label.png"
         dst = tmp_path / "mask.png"
@@ -232,17 +237,18 @@ class TestConvertMask:
         convert_mask(src, dst, lut)
         result = np.array(Image.open(dst))
         assert (
-            result == 0
-        ).all(), f"Expected all 0, got unique values: {np.unique(result)}"
+            result == 1
+        ).all(), f"Expected all 1, got unique values: {np.unique(result)}"
 
-    def test_clutter_pixels_become_255(self, lut, tmp_path):
+    def test_clutter_pixels_become_zero(self, lut, tmp_path):
+        """Clutter is a valid class (id 0), never the ignore label."""
         img = self._make_rgb_mask([(0, 0, 0)])
         src = tmp_path / "clutter.png"
         dst = tmp_path / "mask.png"
         img.save(src)
         convert_mask(src, dst, lut)
         result = np.array(Image.open(dst))
-        assert (result == 255).all()
+        assert (result == 0).all()
 
     def test_unknown_colour_becomes_ignore(self, lut, tmp_path):
         """Pixels with an unrecognised colour must be treated as ignore."""
@@ -255,7 +261,7 @@ class TestConvertMask:
         assert (result == 255).all()
 
     def test_mixed_classes_correct_ids(self, lut, tmp_path):
-        """A mask with Building + Clutter should produce ids 0 and 255."""
+        """A mask with Building + Clutter should produce ids 1 and 0 (both valid)."""
         colours = [(128, 0, 0), (0, 0, 0)]  # Building, Clutter
         img = self._make_rgb_mask(colours)
         src = tmp_path / "mixed.png"
@@ -264,7 +270,7 @@ class TestConvertMask:
         convert_mask(src, dst, lut)
         result = np.array(Image.open(dst))
         unique = set(result.flatten().tolist())
-        assert unique == {0, 255}
+        assert unique == {1, 0}
 
     def test_output_is_single_channel(self, lut, tmp_path):
         img = self._make_rgb_mask([(128, 0, 0)])
@@ -283,8 +289,8 @@ class TestConvertMask:
         convert_mask(src, dst, lut, dry_run=True)
         assert not dst.exists()
 
-    def test_all_seven_eval_classes_round_trip(self, lut, colour_map, tmp_path):
-        """Each of the 7 eval colours should survive a full round-trip."""
+    def test_all_eight_eval_classes_round_trip(self, lut, colour_map, tmp_path):
+        """Each of the 8 eval colours (including Clutter) should survive a full round-trip."""
         eval_colours = [(c, v) for c, v in colour_map.items() if v != IGNORE_LABEL]
         n = len(eval_colours)
         w, h = n * 4, 4
@@ -310,17 +316,18 @@ class TestConvertMask:
 
 
 class TestGetYoloClassNames:
-    def test_seven_classes_returned(self, labels_info):
+    def test_eight_classes_returned(self, labels_info):
         names = get_yolo_class_names(labels_info)
-        assert len(names) == 7
+        assert len(names) == 8
 
-    def test_clutter_not_in_names(self, labels_info):
+    def test_clutter_is_class_zero(self, labels_info):
+        """Clutter is a valid class and must be present, at id 0 (its trainId)."""
         names = get_yolo_class_names(labels_info)
-        assert "Clutter" not in names.values()
+        assert names[0] == "Clutter"
 
-    def test_building_is_class_zero(self, labels_info):
+    def test_building_is_class_one(self, labels_info):
         names = get_yolo_class_names(labels_info)
-        assert names[0] == "Building"
+        assert names[1] == "Building"
 
     def test_ids_are_consecutive(self, labels_info):
         names = get_yolo_class_names(labels_info)
@@ -345,7 +352,7 @@ class TestLoadLabelsInfo:
         info = load_labels_info(real_path)
         assert len(info) == 8
         clutter = next(c for c in info if c["name"] == "Clutter")
-        assert clutter["ignoreInEval"] is True
+        assert clutter["ignoreInEval"] is False
         assert clutter["color"] == [0, 0, 0]
 
 
@@ -372,12 +379,17 @@ class TestBuildTrainidLut:
         lut = build_trainid_lut(labels_info, ignore_lb=255)
         assert lut[7, 8, 9] == 255
 
-    def test_different_from_yolo_lut(self, labels_info):
-        """Clutter entry must differ: trainId LUT has 0, YOLO LUT has 255."""
+    def test_matches_yolo_lut_for_known_classes(self, labels_info):
+        """Since no class is ignoreInEval, the YOLO LUT and CABiNet trainId LUT
+        now agree exactly for every known colour (both use raw trainId 0-7),
+        including Clutter → 0 in both."""
         trainid_lut = build_trainid_lut(labels_info)
         yolo_lut = build_lut(build_colour_map(labels_info))
         assert trainid_lut[0, 0, 0] == 0  # Clutter → 0 in CABiNet
-        assert yolo_lut[0, 0, 0] == IGNORE_LABEL  # Clutter → 255 in YOLO
+        assert yolo_lut[0, 0, 0] == 0  # Clutter → 0 in YOLO too (valid class)
+        for cls in labels_info:
+            r, g, b = cls["color"]
+            assert trainid_lut[r, g, b] == yolo_lut[r, g, b] == cls["trainId"]
 
 
 # ---------------------------------------------------------------------------
