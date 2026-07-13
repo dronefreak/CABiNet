@@ -14,24 +14,6 @@ CABiNet (Context Aggregation Network) is a dual-branch convolutional neural netw
   <img src="assets/showcase_mosaic.gif" alt="UAVid Semantic Segmentation Demo">
 </p>
 
-## Key Features
-
-- **High Performance**: Achieves 75.9% mIoU on Cityscapes test set at 76 FPS (NVIDIA RTX 2080Ti)
-- **Edge Deployment**: 8 FPS on Jetson Xavier NX for embedded applications
-- **Dual-Branch Architecture**: Combines high-resolution spatial detailing with efficient context aggregation
-- **Lightweight Design**: Reduced computational overhead through optimized global and local context blocks
-- **Multi-Scale Support**: Effective feature extraction across different scales
-
-## Performance
-
-| Model              | Dataset    | mIoU  | FPS (RTX 2080Ti) | FPS (Jetson Xavier NX) | Params (M) |
-| ------------------ | ---------- | ----- | ---------------- | ---------------------- | ---------- |
-| **CABiNet (ours)** | Cityscapes | 75.9% | 76               | 8                      | ~3.0       |
-| YOLOv8m-seg        | Cityscapes | 73.5% | —                | —                      | 27.3       |
-| YOLOv11m-seg       | Cityscapes | 74.2% | —                | —                      | 22.4       |
-
-Cityscapes numbers above are literature-reported instance-segmentation (`-seg`) baselines, kept for historical reference. For UAVid, CABiNet is benchmarked directly against Ultralytics' dense semantic-segmentation task (`yolo26*-sem`, not `-seg`) under one shared pipeline — see [UAVid Model Zoo](#uavid-model-zoo) for the full per-model comparison.
-
 ## Architecture
 
 The CABiNet architecture employs a dual-branch design that balances spatial detail preservation and contextual understanding:
@@ -63,17 +45,17 @@ _Columns: Input images, State-of-the-art predictions, CABiNet predictions (white
 
 ## UAVid Model Zoo
 
-CABiNet and Ultralytics YOLO26 (`semantic` task, dense per-pixel — not `-seg`) are trained and evaluated under one shared UAVid pipeline (`images/`+`masks/` format, 8 classes incl. Clutter). Full per-class breakdowns and model cards: [`hf_modelcards/`](hf_modelcards/); HF weights below will be populated once the models are pushed.
+CABiNet and Ultralytics YOLO26 (`semantic` task, dense per-pixel — not `-seg`) are trained and evaluated under one shared UAVid pipeline (`images/`+`masks/` format, 8 classes incl. Clutter).
 
-| Model                       | mIoU (%) | Params (M) | FLOPs (B) | HF Weights |
-| --------------------------- | -------- | ---------- | --------- | ---------- |
-| CABiNet (MobileNetV3-Large) | TBD¹     | TBD        | TBD       | TBD        |
-| CABiNet (MobileNetV3-Small) | TBD²     | TBD        | TBD       | TBD        |
-| YOLO26n-sem                 | 63.58    | TBD        | TBD       | TBD        |
-| YOLO26s-sem                 | 66.88    | TBD        | TBD       | TBD        |
-| YOLO26m-sem                 | 67.66    | TBD        | TBD       | TBD        |
-| YOLO26l-sem                 | 67.20    | TBD        | TBD       | TBD        |
-| YOLO26x-sem                 | TBD³     | TBD        | TBD       | TBD        |
+| Model                       | mIoU (%) | Params (M) | FLOPs (B) | HF Weights                                                                    |
+| --------------------------- | -------- | ---------- | --------- | ----------------------------------------------------------------------------- |
+| CABiNet (MobileNetV3-Large) | TBD¹     | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/cabinet-mobilenetv3-small-uavid) |
+| CABiNet (MobileNetV3-Small) | TBD²     | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/cabinet-mobilenetv3-large-uavid) |
+| YOLO26n-sem                 | 63.58    | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26n-sem)               |
+| YOLO26s-sem                 | 66.88    | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26s-sem)               |
+| YOLO26m-sem                 | 67.66    | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26m-sem)               |
+| YOLO26l-sem                 | 67.20    | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26l-sem)               |
+| YOLO26x-sem                 | TBD³     | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26x-sem)               |
 
 ¹ Trained under the refactored pipeline but not yet re-evaluated. ² Not yet trained. ³ Not yet trained.
 
