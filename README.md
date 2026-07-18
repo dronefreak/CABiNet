@@ -47,17 +47,19 @@ _Columns: Input images, State-of-the-art predictions, CABiNet predictions (white
 
 CABiNet and Ultralytics YOLO26 (`semantic` task, dense per-pixel — not `-seg`) are trained and evaluated under one shared UAVid pipeline (`images/`+`masks/` format, 8 classes incl. Clutter).
 
-| Model                       | mIoU (%) | Params (M) | FLOPs (B) | HF Weights                                                                    |
-| --------------------------- | -------- | ---------- | --------- | ----------------------------------------------------------------------------- |
-| CABiNet (MobileNetV3-Large) | TBD¹     | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/cabinet-mobilenetv3-small-uavid) |
-| CABiNet (MobileNetV3-Small) | TBD²     | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/cabinet-mobilenetv3-large-uavid) |
-| YOLO26n-sem                 | 63.58    | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26n-sem)               |
-| YOLO26s-sem                 | 66.88    | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26s-sem)               |
-| YOLO26m-sem                 | 67.66    | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26m-sem)               |
-| YOLO26l-sem                 | 67.20    | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26l-sem)               |
-| YOLO26x-sem                 | TBD³     | TBD        | TBD       | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26x-sem)               |
+All numbers below are test-split mIoU (not val — see [`train_yolo.py`](src/scripts/train_yolo.py)'s `validation_config.split`). Params/FLOPs are architecture-only, measured at 1024×1024 via `thop` (CABiNet) / Ultralytics' built-in profiler (YOLO26, also `thop`-backed — both report FLOPs as 2× MACs, so the two families are directly comparable).
 
-¹ Trained under the refactored pipeline but not yet re-evaluated. ² Not yet trained. ³ Not yet trained.
+| Model                       | mIoU (%) | Params (M) | FLOPs (GFLOPs) | HF Weights                                                                    |
+| --------------------------- | -------- | ---------- | -------------- | ----------------------------------------------------------------------------- |
+| CABiNet (MobileNetV3-Large) | 68.60    | 9.17       | 54.8           | [HF Model](https://huggingface.co/dronefreak/cabinet-mobilenetv3-large-uavid) |
+| CABiNet (MobileNetV3-Small) | 66.84    | 5.36       | 44.1           | [HF Model](https://huggingface.co/dronefreak/cabinet-mobilenetv3-small-uavid) |
+| YOLO26x-sem                 | 64.41    | 40.16      | 430.9          | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26x-sem)               |
+| YOLO26l-sem                 | 63.28    | 17.87      | 192.4          | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26l-sem)               |
+| YOLO26m-sem                 | 61.98    | 14.32      | 152.3          | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26m-sem)               |
+| YOLO26s-sem                 | 61.69    | 6.50       | 44.4           | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26s-sem)               |
+| YOLO26n-sem                 | 58.17    | 1.63       | 11.4           | [HF Model](https://huggingface.co/dronefreak/uavid-yolo26n-sem)               |
+
+CABiNet (both backbones) outperforms **every** YOLO26-sem variant on UAVid, including the largest (YOLO26x) — and does so at a fraction of the compute: CABiNet-Large (54.8 GFLOPs) beats YOLO26x (430.9 GFLOPs, ~8× more) and YOLO26m (152.3 GFLOPs, ~3× more) on both mIoU and FLOPs simultaneously. CABiNet-Small also improves substantially over the numbers originally reported in the [CABiNet paper](#citation) on this dataset.
 
 ## Installation
 
@@ -422,7 +424,7 @@ python src/scripts/visualize.py
 
 ### Performance Profiling
 
-Benchmark inference timing and memory usage (`profile_model_flops` currently measures `torch.profiler` CPU/CUDA time, not analytic FLOP counts — real FLOPs for the [UAVid Model Zoo](#uavid-model-zoo) table are still TBD):
+Benchmark inference timing and memory usage (`profile_model_flops` measures `torch.profiler` CPU/CUDA time, not analytic FLOP counts — the analytic Params/FLOPs in the [UAVid Model Zoo](#uavid-model-zoo) table above were computed separately via `thop`):
 
 ```python
 from src.utils.profiler import PerformanceProfiler
