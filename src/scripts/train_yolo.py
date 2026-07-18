@@ -1,6 +1,7 @@
 #!/usr/bin/python
 # -*- encoding: utf-8 -*-
 
+import json
 import logging
 from pathlib import Path
 
@@ -10,6 +11,21 @@ from omegaconf import DictConfig, OmegaConf
 from src.utils.logger import RichConsoleManager
 
 logger = logging.getLogger(__name__)
+
+# UAVid classes in trainId order (0-7) — matches configs/UAVid_info.json and
+# hf_modelcards/generate_hf_model_zoo.py's UAVID_CLASSES. Used only to label
+# mode=val's per-class IoU printout in a form directly pastable into a
+# hf_modelcards/model_metrics/<model>/metrics.json.
+UAVID_CLASS_NAMES = [
+    "Clutter",
+    "Building",
+    "Road",
+    "Static Car",
+    "Tree",
+    "Vegetation",
+    "Human",
+    "Moving Car",
+]
 
 # Repo root: src/scripts/train_yolo.py -> src/scripts -> src -> <repo root>
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -164,7 +180,7 @@ def _build_val_kwargs(cfg: DictConfig, dataset_path: Path, weights: str) -> dict
         "imgsz": int(cfg.training_config.imgsz),
         "batch": int(vc.get("batch_size", 1)),
         "device": cfg.runtime.get("device", 0),
-        "split": "val",
+        "split": str(vc.get("split", "val")),
         "save_json": bool(vc.get("save_json", True)),
         "augment": bool(vc.get("augment", False)),
         "plots": True,
@@ -239,11 +255,33 @@ def main(cfg: DictConfig) -> None:
         console.print(f"Validating with weights: {weights_path}", style="info")
         model = YOLO(str(weights_path))
         val_kwargs = _build_val_kwargs(cfg, dataset_path, str(weights_path))
+        split = val_kwargs["split"]
 
         results = model.val(**val_kwargs)
         if results is not None:
+            console.print(f"Split: {split}", style="info")
             console.print(f"mIoU: {results.miou:.4f}", style="info")
             console.print(f"Pixel accuracy: {results.pixel_accuracy:.4f}", style="info")
+
+            per_class_iou = {
+                name: round(float(iou), 4)
+                for name, iou in zip(UAVID_CLASS_NAMES, results.per_class_iou)
+            }
+            console.print("Per-class IoU:", style="info")
+            for name, iou in per_class_iou.items():
+                console.print(f"  {name}: {iou:.4f}", style="info")
+
+            metrics_snippet = {
+                "eval_split": split,
+                "miou": round(float(results.miou), 4),
+                "pixel_acc": round(float(results.pixel_accuracy), 4),
+                "per_class_iou": per_class_iou,
+            }
+            console.print(
+                "\nPaste into hf_modelcards/model_metrics/<model>/metrics.json:",
+                style="info",
+            )
+            console.print(json.dumps(metrics_snippet, indent=2), style="info")
 
     else:
         raise ValueError(

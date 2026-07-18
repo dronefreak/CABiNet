@@ -115,6 +115,7 @@ validation_config:
   save_json: true
   augment: false # TTA: set true on CLI for augmented eval
   weights: ~ # null → auto-inferred from experiments_path/model.run_name
+  split: val # 'val' or 'test' — override: validation_config.split=test
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 runtime:
