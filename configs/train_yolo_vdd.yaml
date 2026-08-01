@@ -1,0 +1,114 @@
+# train_yolo_vdd.yaml
+# Hydra root config for YOLO semantic segmentation on VDD (Varied Drone Dataset)
+#
+# Uses Ultralytics' dedicated 'semantic' task (dense per-pixel FCN-style head,
+# CE+Dice+aux loss, mIoU/pixel-acc metric) — distinct from 'segment' (instance/
+# polygon-based). Only the yolo26*-sem model family supports it.
+#
+# Usage (train):
+#   python src/scripts/train_yolo.py --config-name train_yolo_vdd
+#   python src/scripts/train_yolo.py --config-name train_yolo_vdd 'yolo/model@model=yolo26s-sem'
+#
+# Override individual hyperparameters (Hydra dotted-path style):
+#   python src/scripts/train_yolo.py --config-name train_yolo_vdd training_config.epochs=200 training_config.batch_size=8
+#
+# Usage (validate best checkpoint):
+#   python src/scripts/train_yolo.py --config-name train_yolo_vdd mode=val \
+#       validation_config.weights=runs/vdd_yolo/yolo26n/weights/best.pt
+#
+# Resume interrupted training:
+#   python src/scripts/train_yolo.py --config-name train_yolo_vdd training_config.resume=true
+
+defaults:
+  - _self_
+  - yolo/model@model: yolo26n-sem # override: 'yolo/model@model=yolo26x-sem'
+
+# Mode: train | val | test | predict
+mode: train
+
+# Path to the Ultralytics-format dataset YAML (not Hydra-format)
+dataset:
+  name: vdd_yolo
+  config_file: configs/dataset/vdd_yolo.yaml
+
+# ── Training configuration ────────────────────────────────────────────────────
+training_config:
+  epochs: 150 # VDD is tiny (280 train images) → more epochs help
+  batch_size: 4
+  imgsz: 1024 # native res is 4000x3000 (uniform) — a genuine downscale
+  num_workers: 8
+
+  nbs: 64
+
+  amp: true
+
+  # Optimizer
+  optimizer: SGD
+  optimizer_lr_start: 0.01
+  lrf: 0.01
+  optimizer_momentum: 0.937
+  optimizer_weight_decay: 0.0005
+  warmup_epochs: 3.0
+  warmup_momentum: 0.8
+  warmup_bias_lr: 0.1
+  cos_lr: true
+
+  patience: 50
+
+  save_period: 50
+  resume: false
+
+  # Class imbalance (VDD: Vehicle/Roof/Water are comparatively rare)
+  cls_pw: 0.5
+
+  experiments_path: experiments/${dataset.name}
+  exist_ok: false
+
+  # ── Augmentation ───────────────────────────────────────────────────────────
+  augmentation:
+    degrees: 10.0
+    translate: 0.05
+    scale: 0.3
+    shear: 0.0
+    perspective: 0.0
+    flipud: 0.2 # VDD includes top-down and oblique views
+    fliplr: 0.5
+
+    hsv_h: 0.01
+    hsv_s: 0.4
+    hsv_v: 0.3
+
+    # VDD has very few training images (280); heavier augmentation helps
+    # offset the small dataset size
+    mosaic: 0.8
+    mixup: 0.15
+    copy_paste: 0.15
+    copy_paste_mode: flip
+
+    close_mosaic: 15
+
+    multi_scale: 0.0
+
+# ── Validation configuration ─────────────────────────────────────────────────
+validation_config:
+  # Unlike UAVid (batch_size=1 required — mixed source resolution), VDD is
+  # uniformly 4000x3000, so a batched eval is safe here.
+  batch_size: 4
+  save_json: true
+  augment: false
+  weights: ~
+  split: val # 'val' or 'test' — override: validation_config.split=test
+
+# ── Runtime ──────────────────────────────────────────────────────────────────
+runtime:
+  seed: 0
+  device: 0
+  deterministic: true
+
+# ── Hydra output ─────────────────────────────────────────────────────────────
+hydra:
+  run:
+    dir: ${training_config.experiments_path}/hydra/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: ${training_config.experiments_path}/sweeps
+    subdir: ${hydra.job.num}

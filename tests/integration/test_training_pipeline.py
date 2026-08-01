@@ -10,7 +10,7 @@ import torch.nn.utils as nn_utils
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.scripts.evaluate import MscEvalV0
-from src.scripts.train import _load_checkpoint, _save_checkpoint
+from src.scripts.train import _load_checkpoint, _load_pretrained_checkpoint, _save_checkpoint
 from src.utils.early_stopping import EarlyStopping
 from src.utils.ema import ModelEMA
 from src.utils.loss import OhemCELoss
@@ -832,4 +832,115 @@ class TestMaxIterOptimizerSteps:
         assert lr_near_end < lr_start * 0.1, (
             f"LR at max_iter-1 ({lr_near_end:.6f}) should be < 10% of initial "
             f"({lr_start:.6f}). The schedule may not be using optimizer steps."
+        )
+
+
+class TestPretrainedCheckpointWarmStart:
+    """Tests for _load_pretrained_checkpoint — cross-dataset finetuning.
+
+    E.g. warm-starting an AeroScapes (num_classes=12) or VDD (num_classes=7)
+    run from a checkpoint trained on UAVid (num_classes=8): the two
+    classifier heads (ab.b4, conv_out.conv_out) are sized by num_classes and
+    essentially never match across datasets, so they must be skipped while
+    everything else (backbone/CAB/spatial/fusion) transfers.
+    """
+
+    def _save_raw_state_dict(self, model, path):
+        torch.save(model.state_dict(), path)
+
+    def test_cross_dataset_transfers_backbone_skips_classifier_heads(
+        self, mock_small_model
+    ):
+        source = mock_small_model(num_classes=8)  # e.g. UAVid-trained
+        target = mock_small_model(num_classes=12)  # e.g. AeroScapes, fresh init
+        device = torch.device("cpu")
+
+        # A matching-shape param (backbone) to prove transfer happened.
+        backbone_key = next(
+            k for k in source.state_dict() if k.startswith("mobile.")
+        )
+        # Perturb the source's backbone weight so it's distinguishable from
+        # target's independent random init.
+        with torch.no_grad():
+            source.state_dict()[backbone_key].add_(1.0)
+        source_backbone_before = source.state_dict()[backbone_key].clone()
+        target_head_shape_before = target.conv_out.conv_out.weight.shape
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt = Path(tmpdir) / "ckpt.pth"
+            optim = self._make_optimizer_static(source)
+            scaler = torch.amp.GradScaler(device="cpu", enabled=False)
+            ema = ModelEMA(source)
+            stopper = EarlyStopping(patience=10)
+            _save_checkpoint(
+                ckpt,
+                epoch=0,
+                net=source,
+                optim=optim,
+                scaler=scaler,
+                ema=ema,
+                stopper=stopper,
+                best_miou=0.5,
+                best_loss=0.1,
+            )
+
+            _load_pretrained_checkpoint(target, ckpt, device)
+
+        # Matching-shape backbone param transferred exactly.
+        assert torch.equal(target.state_dict()[backbone_key], source_backbone_before)
+        # Classifier heads keep the TARGET's own shape (num_classes=12),
+        # proving they were not overwritten with the source's (8,...) shape.
+        assert target.conv_out.conv_out.weight.shape == target_head_shape_before
+        assert target.conv_out.conv_out.weight.shape[0] == 12
+
+    def test_same_num_classes_full_transfer(self, mock_small_model):
+        """When num_classes matches, every parameter (including the
+        classifier heads) should transfer — no shape mismatches to skip."""
+        source = mock_small_model(num_classes=8)
+        target = mock_small_model(num_classes=8)
+        device = torch.device("cpu")
+
+        with torch.no_grad():
+            for p in source.parameters():
+                p.add_(1.0)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt = Path(tmpdir) / "ckpt.pth"
+            self._save_raw_state_dict(source, ckpt)
+            _load_pretrained_checkpoint(target, ckpt, device)
+
+        for k, v in source.state_dict().items():
+            assert torch.equal(target.state_dict()[k], v), f"{k} did not transfer"
+
+    def test_accepts_raw_state_dict_not_just_full_checkpoint(self, mock_small_model):
+        """_load_pretrained_checkpoint must accept a bare model.state_dict()
+        (e.g. a *_best.pth save), not only the {"model_state": ...} shape
+        produced by _save_checkpoint."""
+        source = mock_small_model(num_classes=8)
+        target = mock_small_model(num_classes=8)
+        device = torch.device("cpu")
+
+        with torch.no_grad():
+            for p in source.parameters():
+                p.add_(2.0)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ckpt = Path(tmpdir) / "raw_state_dict.pth"
+            self._save_raw_state_dict(source, ckpt)
+            # Must not raise, and must actually transfer weights.
+            _load_pretrained_checkpoint(target, ckpt, device)
+
+        sample_key = next(iter(source.state_dict()))
+        assert torch.equal(
+            target.state_dict()[sample_key], source.state_dict()[sample_key]
+        )
+
+    def _make_optimizer_static(self, model):
+        return Optimizer(
+            model=model,
+            lr0=1e-3,
+            momentum=0.9,
+            wd=5e-4,
+            warmup_steps=0,
+            max_iter=1000,
         )

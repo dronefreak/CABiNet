@@ -1,0 +1,61 @@
+# VDD (Varied Drone Dataset) configuration for Ultralytics YOLO semantic segmentation
+#
+# Format: https://docs.ultralytics.com/datasets/semantic/
+# Masks:  single-channel PNG, pixel value = class index (0-6). 255 remains
+#         reserved for genuinely unrecognized values.
+#
+# Pre-processing required
+# -----------------------
+# Convert the raw VDD distribution (train/val/test, each with src/ and gt/)
+# to the shared images/+masks/ layout first:
+#
+#   python src/scripts/convert_vdd_to_yolo.py \
+#       --src /path/to/VDD \
+#       --dst /path/to/vdd_yolo
+#
+# Then set the ``path`` field below to /path/to/vdd_yolo.
+#
+# Class mapping (all 7 classes are valid; none are ignored)
+# -----------------------------------------------------------
+#   0  Other        (background clutter)
+#   1  Wall
+#   2  Road
+#   3  Vegetation
+#   4  Vehicle
+#   5  Roof
+#   6  Water
+
+# Root path. Ultralytics parses this file with plain YAML (no Hydra/OmegaConf
+# env-var resolution), so this must be a literal path — edit it directly for
+# your machine, or point `data=` at a copy of this file with your own path.
+path: /home/neural_debugger/Downloads/datasets/VDD/VDD-YOLO
+
+train: images/train # relative to path
+val: images/val # relative to path
+test: images/test # relative to path
+
+# Mask directory (must mirror images/ structure): images/train -> masks/train, etc.
+masks_dir: masks # relative to path
+
+# Number of semantic classes
+nc: 7
+
+# Class names — order must match the integer class IDs above
+names:
+  0: Other
+  1: Wall
+  2: Road
+  3: Vegetation
+  4: Vehicle
+  5: Roof
+  6: Water
+
+# Ultralytics training command example
+# -------------------------------------
+# yolo semantic train \
+#     model=yolo26n-sem.pt \
+#     data=configs/dataset/vdd_yolo.yaml \
+#     imgsz=1024 \
+#     epochs=120 \
+#     batch=4 \
+#     device=0

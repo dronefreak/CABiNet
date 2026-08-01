@@ -1,0 +1,72 @@
+# AeroScapes dataset configuration for Ultralytics YOLO semantic segmentation
+#
+# Format: https://docs.ultralytics.com/datasets/semantic/
+# Masks:  single-channel PNG, pixel value = class index (0-11). 255 remains
+#         reserved for genuinely unrecognized values.
+#
+# Pre-processing required
+# -----------------------
+# Convert the raw AeroScapes distribution (JPEGImages/, SegmentationClass/,
+# ImageSets/) to the shared images/+masks/ layout first:
+#
+#   python src/scripts/convert_aeroscapes_to_yolo.py \
+#       --src /path/to/aeroscapes \
+#       --dst /path/to/aeroscapes_yolo
+#
+# Then set the ``path`` field below to /path/to/aeroscapes_yolo.
+#
+# Class mapping (all 12 classes are valid; none are ignored)
+# -----------------------------------------------------------
+#   0  Background     [  0,   0,   0]
+#   1  Person         [192, 128, 128]
+#   2  Bike           [  0, 128,   0]
+#   3  Car            [128, 128, 128]
+#   4  Drone          [128,   0,   0]
+#   5  Boat           [  0,   0, 128]
+#   6  Animal         [192,   0, 128]
+#   7  Obstacle       [192,   0,   0]
+#   8  Construction   [192, 128,   0]
+#   9  Vegetation     [  0,  64,   0]
+#  10  Road           [128, 128,   0]
+#  11  Sky            [  0, 128, 128]
+
+# Root path. Ultralytics parses this file with plain YAML (no Hydra/OmegaConf
+# env-var resolution), so this must be a literal path — edit it directly for
+# your machine, or point `data=` at a copy of this file with your own path.
+path: /home/neural_debugger/Downloads/datasets/AeroScapes/AeroScapes-YOLO
+
+train: images/train # relative to path
+val: images/val # relative to path
+# NOTE: no 'test:' key — the source AeroScapes distribution has no test
+# split (only ImageSets/trn.txt and val.txt); the converter never produces one.
+
+# Mask directory (must mirror images/ structure): images/train -> masks/train, etc.
+masks_dir: masks # relative to path
+
+# Number of semantic classes (all 12 AeroScapes classes)
+nc: 12
+
+# Class names — order must match the integer class IDs above
+names:
+  0: Background
+  1: Person
+  2: Bike
+  3: Car
+  4: Drone
+  5: Boat
+  6: Animal
+  7: Obstacle
+  8: Construction
+  9: Vegetation
+  10: Road
+  11: Sky
+
+# Ultralytics training command example
+# -------------------------------------
+# yolo semantic train \
+#     model=yolo26n-sem.pt \
+#     data=configs/dataset/aeroscapes_yolo.yaml \
+#     imgsz=896 \
+#     epochs=100 \
+#     batch=8 \
+#     device=0

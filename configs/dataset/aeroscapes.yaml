@@ -1,0 +1,48 @@
+# Dataset Configuration for CABiNet training on AeroScapes
+#
+# dataset_path must point at the PRE-CONVERTED dataset produced by
+# src/scripts/convert_aeroscapes_to_yolo.py:
+#
+#   <dataset_path>/
+#   ├── images/{train,val}/   ← RGB JPEGs (uniformly 1280x720)
+#   └── masks/{train,val}/    ← single-channel PNGs, pixel value = class ID
+#
+# This is NOT the raw AeroScapes distribution (JPEGImages/, SegmentationClass/,
+# ImageSets/) — convert it first:
+#   python src/scripts/convert_aeroscapes_to_yolo.py \
+#       --src /path/to/raw/aeroscapes --dst /path/to/converted
+#
+# All 12 classes are valid trainIds 0-11 — see configs/AeroScapes_info.json.
+# No colour palette or lookup table is needed at load time; the conversion
+# step's source masks were already single-channel class IDs.
+#
+# Unlike UAVid, AeroScapes source images are uniformly 1280x720, so there is
+# no batch_size=1 validation constraint here — standard batched validation
+# works.
+#
+# NOTE: the source dataset has no test split (only ImageSets/trn.txt and
+# val.txt) — the converter only ever produces train/val.
+
+name: aeroscapes
+num_classes: 12 # Background(0) … Sky(11); all 12 classes valid, none ignored
+cropsize: [720, 720] # native res is 1280x720 (uniform) — smaller than UAVid's 3840x2160
+dataset_path: ${oc.env:AEROSCAPES_YOLO_ROOT,''} # path to the CONVERTED dataset root
+ignore_idx: 255 # label for genuinely unrecognized pixel values (should not occur)
+seed: 0
+
+# Class weights are computed at training startup from a sample of the
+# training set via training_config.cls_pw (see configs/train.yaml) — same
+# mechanism as uavid.yaml, not a static per-dataset table.
+
+# Training augmentation — same knobs/defaults as configs/dataset/uavid.yaml;
+# AeroScapes is also UAV-captured imagery so the same recipe applies.
+augmentation:
+  degrees: 10.0 # rotation ±10° (matches RandomRotate)
+  translate: 0.05 # small translation, fraction of image size
+  scale: 0.3 # scale jitter ±30% (continuous)
+  flipud: 0.2 # vertical flip — AeroScapes includes top-down and oblique views
+  fliplr: 0.5 # horizontal flip
+  hsv_h: 0.01 # small hue shift (controlled imaging conditions)
+  hsv_s: 0.4 # saturation jitter
+  hsv_v: 0.3 # brightness/value jitter
+  mixup: 0.1 # probability of blending with a second random sample

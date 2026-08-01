@@ -1,0 +1,31 @@
+# =============================================================================
+# Ultralytics YOLO — AeroScapes Validation / Benchmark Config
+# =============================================================================
+# Usage (after training):
+#   Single-scale:
+#     yolo semantic val cfg=configs/yolo/aeroscapes_val.yaml \
+#         model=runs/aeroscapes/yolo26n/weights/best.pt
+#
+#   Test-time augmentation (TTA):
+#     yolo semantic val cfg=configs/yolo/aeroscapes_val.yaml \
+#         model=runs/aeroscapes/yolo26n/weights/best.pt \
+#         augment=True
+# =============================================================================
+
+task: semantic
+data: configs/dataset/aeroscapes_yolo.yaml
+
+imgsz: 896
+# Unlike UAVid (batch=1 required — mixed source resolution), AeroScapes is
+# uniformly 1280x720, so a batched eval is safe here.
+batch: 8
+split: val # no test split available for this dataset
+device: 0
+workers: 4
+
+save_json: True # save per-image results for offline analysis
+plots: True # confusion matrix + class-level IoU bar chart
+verbose: True
+
+# Test-time augmentation (TTA) — enable with: augment=True on CLI
+augment: False

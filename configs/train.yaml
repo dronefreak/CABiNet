@@ -18,6 +18,17 @@ training_config:
   optimizer_power: 0.9
   warmup_steps: 4000
   warmup_start_lr: 1e-5
+  # Warm-start model weights from a full CABiNet checkpoint trained on a
+  # (possibly different) dataset — e.g. finetune AeroScapes/VDD from a
+  # UAVid-trained checkpoint, which converges much faster than
+  # backbone-only (ImageNet) init. Only parameters whose name AND shape
+  # match are loaded — the two classifier heads (sized by num_classes) are
+  # skipped when they differ, everything else (backbone/CAB/spatial/fusion)
+  # transfers. Independent of `resume` below: this never restores
+  # optimizer/EMA/epoch state, it's a fresh training run with warm-started
+  # weights. Accepts either a full training checkpoint (checkpoint_last.pth)
+  # or a raw model state_dict (*_best.pth).
+  pretrained_ckpt_path: null
   # max_iterations is in OPTIMIZER STEPS (not batches).
   # train.py computes this as ceil(epochs * batches_per_epoch / accum_steps).
   # Setting it here is optional — if absent, train.py derives it automatically.
@@ -34,7 +45,7 @@ training_config:
 
   max_grad_norm: 1.0 # Gradient clipping threshold; set to null/0 to disable
   log_iter: 20 # Renamed from 'msg_iterations' — clearer intent
-  experiments_path: experiments/cabinet_experiments_large_1024x1024
+  experiments_path: experiments/${dataset.name}/cabinet_experiments_large_${dataset.cropsize[0]}x${dataset.cropsize[1]} # Output path for checkpoints, logs, etc.
   model_save_name: cabinet.pth
   resume: false # Set to true to resume from checkpoint_last.pth in experiments_path
 
