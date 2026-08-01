@@ -25,6 +25,7 @@ from src.datasets.transform import (
     RandomScale,
     RandomTranslate,
     RandomVerticalFlip,
+    ResizeIfLarger,
 )
 
 # Same knobs/semantics as src/datasets/uavid.py's DEFAULT_AUGMENTATION — VDD
@@ -174,6 +175,13 @@ class VDD(Dataset):
         self.trans_train = (
             Compose(
                 [
+                    # VDD's native images are 4000x3000 (~11x a 1024x1024
+                    # crop) — cap the working resolution before the
+                    # expensive geometric ops below, or CPU-side
+                    # augmentation becomes the training bottleneck (GPU
+                    # starves waiting on the DataLoader). See
+                    # ResizeIfLarger's docstring.
+                    ResizeIfLarger(max_size=2 * max(self.cropsize)),
                     RandomHorizontalFlip(p=float(self.aug["fliplr"])),
                     RandomVerticalFlip(p=float(self.aug["flipud"])),
                     RandomTranslate(

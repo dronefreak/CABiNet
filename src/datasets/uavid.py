@@ -25,6 +25,7 @@ from src.datasets.transform import (
     RandomScale,
     RandomTranslate,
     RandomVerticalFlip,
+    ResizeIfLarger,
 )
 
 # Mirrors configs/yolo/uavid_train.yaml / configs/train_yolo.yaml's
@@ -191,6 +192,12 @@ class UAVid(Dataset):
         self.trans_train = (
             Compose(
                 [
+                    # UAVid's native images run up to 4096x2160 (~8.85MP) —
+                    # cap the working resolution before the expensive
+                    # geometric ops below, or CPU-side augmentation becomes
+                    # the training bottleneck (GPU starves waiting on the
+                    # DataLoader). See ResizeIfLarger's docstring.
+                    ResizeIfLarger(max_size=2 * max(self.cropsize)),
                     RandomHorizontalFlip(p=float(self.aug["fliplr"])),
                     RandomVerticalFlip(p=float(self.aug["flipud"])),
                     RandomTranslate(

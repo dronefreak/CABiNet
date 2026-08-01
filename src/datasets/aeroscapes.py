@@ -25,6 +25,7 @@ from src.datasets.transform import (
     RandomScale,
     RandomTranslate,
     RandomVerticalFlip,
+    ResizeIfLarger,
 )
 
 # Same knobs/semantics as src/datasets/uavid.py's DEFAULT_AUGMENTATION —
@@ -174,6 +175,12 @@ class AeroScapes(Dataset):
         self.trans_train = (
             Compose(
                 [
+                    # No-op at AeroScapes' native 1280x720 with the default
+                    # cropsize, but bounds the working resolution before the
+                    # expensive geometric ops below regardless of cropsize —
+                    # see ResizeIfLarger's docstring (uavid.py/vdd.py hit
+                    # this for real, at their much larger native resolutions).
+                    ResizeIfLarger(max_size=2 * max(self.cropsize)),
                     RandomHorizontalFlip(p=float(self.aug["fliplr"])),
                     RandomVerticalFlip(p=float(self.aug["flipud"])),
                     RandomTranslate(

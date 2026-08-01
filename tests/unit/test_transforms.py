@@ -17,6 +17,7 @@ from src.datasets.transform import (
     RandomScale,
     RandomTranslate,
     RandomVerticalFlip,
+    ResizeIfLarger,
 )
 
 
@@ -384,3 +385,49 @@ class TestRandomHSV:
         after = np.array(result["im"])
 
         assert not np.array_equal(before, after)
+
+
+class TestResizeIfLarger:
+    def test_noop_when_already_within_max_size(self):
+        img = Image.new("RGB", (256, 256), color=(1, 2, 3))
+        lb = Image.new("L", (256, 256), color=1)
+        transform = ResizeIfLarger(max_size=1024)
+        result = transform({"im": img, "lb": lb})
+        assert result["im"].size == (256, 256)
+        assert result["im"] is img  # untouched, not even a copy
+
+    def test_noop_when_exactly_at_max_size(self):
+        img = Image.new("RGB", (1024, 512), color=(1, 2, 3))
+        lb = Image.new("L", (1024, 512), color=1)
+        transform = ResizeIfLarger(max_size=1024)
+        result = transform({"im": img, "lb": lb})
+        assert result["im"].size == (1024, 512)
+
+    def test_downsizes_larger_image_preserving_aspect_ratio(self):
+        img = Image.new("RGB", (4000, 3000), color=(1, 2, 3))
+        lb = Image.new("L", (4000, 3000), color=1)
+        transform = ResizeIfLarger(max_size=2000)
+        result = transform({"im": img, "lb": lb})
+        assert result["im"].size == (2000, 1500)
+        assert result["lb"].size == (2000, 1500)
+
+    def test_never_upsizes(self):
+        img = Image.new("RGB", (100, 80), color=(1, 2, 3))
+        lb = Image.new("L", (100, 80), color=1)
+        transform = ResizeIfLarger(max_size=2000)
+        result = transform({"im": img, "lb": lb})
+        assert result["im"].size == (100, 80)
+
+    def test_caps_on_the_longer_dimension_for_portrait_images(self):
+        img = Image.new("RGB", (1000, 4000), color=(1, 2, 3))
+        lb = Image.new("L", (1000, 4000), color=1)
+        transform = ResizeIfLarger(max_size=2000)
+        result = transform({"im": img, "lb": lb})
+        assert result["im"].size == (500, 2000)
+
+    def test_label_mode_preserved_after_downsize(self):
+        img = Image.new("RGB", (4000, 3000), color=(1, 2, 3))
+        lb = Image.new("L", (4000, 3000), color=1)
+        transform = ResizeIfLarger(max_size=2000)
+        result = transform({"im": img, "lb": lb})
+        assert result["lb"].mode == "L"
