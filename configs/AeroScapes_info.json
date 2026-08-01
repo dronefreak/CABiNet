@@ -1,0 +1,122 @@
+[
+  {
+    "hasInstances": false,
+    "category": "void",
+    "catid": 0,
+    "name": "Background",
+    "ignoreInEval": false,
+    "id": 0,
+    "color": [0, 0, 0],
+    "trainId": 0
+  },
+  {
+    "hasInstances": false,
+    "category": "human",
+    "catid": 1,
+    "name": "Person",
+    "ignoreInEval": false,
+    "id": 1,
+    "color": [192, 128, 128],
+    "trainId": 1
+  },
+  {
+    "hasInstances": false,
+    "category": "vehicle",
+    "catid": 2,
+    "name": "Bike",
+    "ignoreInEval": false,
+    "id": 2,
+    "color": [0, 128, 0],
+    "trainId": 2
+  },
+  {
+    "hasInstances": false,
+    "category": "vehicle",
+    "catid": 2,
+    "name": "Car",
+    "ignoreInEval": false,
+    "id": 3,
+    "color": [128, 128, 128],
+    "trainId": 3
+  },
+  {
+    "hasInstances": false,
+    "category": "vehicle",
+    "catid": 2,
+    "name": "Drone",
+    "ignoreInEval": false,
+    "id": 4,
+    "color": [128, 0, 0],
+    "trainId": 4
+  },
+  {
+    "hasInstances": false,
+    "category": "vehicle",
+    "catid": 2,
+    "name": "Boat",
+    "ignoreInEval": false,
+    "id": 5,
+    "color": [0, 0, 128],
+    "trainId": 5
+  },
+  {
+    "hasInstances": false,
+    "category": "animal",
+    "catid": 3,
+    "name": "Animal",
+    "ignoreInEval": false,
+    "id": 6,
+    "color": [192, 0, 128],
+    "trainId": 6
+  },
+  {
+    "hasInstances": false,
+    "category": "void",
+    "catid": 0,
+    "name": "Obstacle",
+    "ignoreInEval": false,
+    "id": 7,
+    "color": [192, 0, 0],
+    "trainId": 7
+  },
+  {
+    "hasInstances": false,
+    "category": "construction",
+    "catid": 4,
+    "name": "Construction",
+    "ignoreInEval": false,
+    "id": 8,
+    "color": [192, 128, 0],
+    "trainId": 8
+  },
+  {
+    "hasInstances": false,
+    "category": "nature",
+    "catid": 5,
+    "name": "Vegetation",
+    "ignoreInEval": false,
+    "id": 9,
+    "color": [0, 64, 0],
+    "trainId": 9
+  },
+  {
+    "hasInstances": false,
+    "category": "flat",
+    "catid": 6,
+    "name": "Road",
+    "ignoreInEval": false,
+    "id": 10,
+    "color": [128, 128, 0],
+    "trainId": 10
+  },
+  {
+    "hasInstances": false,
+    "category": "nature",
+    "catid": 5,
+    "name": "Sky",
+    "ignoreInEval": false,
+    "id": 11,
+    "color": [0, 128, 128],
+    "trainId": 11
+  }
+]

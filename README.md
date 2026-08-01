@@ -118,15 +118,17 @@ CABiNet/
 │   ├── datasets/            # Data loading and preprocessing
 │   │   ├── cityscapes.py    # Cityscapes dataset loader
 │   │   ├── uavid.py         # UAVid dataset loader
+│   │   ├── aeroscapes.py    # AeroScapes dataset loader
 │   │   ├── registry.py      # Shared dataset registry (train.py + evaluate.py)
 │   │   └── transform.py     # Data augmentation pipeline
 │   ├── scripts/             # Training, evaluation, inference scripts
-│   │   ├── train.py                  # CABiNet training
-│   │   ├── evaluate.py               # CABiNet standalone checkpoint evaluation
-│   │   ├── visualize.py              # Prediction visualization (Cityscapes only)
-│   │   ├── train_yolo.py             # YOLO26-sem training/validation (Hydra CLI)
-│   │   ├── infer_yolo.py             # YOLO26-sem inference + showcase mosaic
-│   │   └── convert_uavid_to_yolo.py  # UAVid RGB masks -> single-channel format
+│   │   ├── train.py                       # CABiNet training
+│   │   ├── evaluate.py                    # CABiNet standalone checkpoint evaluation
+│   │   ├── visualize.py                   # Prediction visualization (Cityscapes only)
+│   │   ├── train_yolo.py                  # YOLO26-sem training/validation (Hydra CLI)
+│   │   ├── infer_yolo.py                  # YOLO26-sem inference + showcase mosaic
+│   │   ├── convert_uavid_to_yolo.py       # UAVid RGB masks -> single-channel format
+│   │   └── convert_aeroscapes_to_yolo.py  # AeroScapes -> shared images/+masks/ format
 │   └── utils/               # Utility functions
 │       ├── loss.py           # OHEM Cross Entropy + Focal Loss
 │       ├── optimizer.py      # Custom optimizer with warmup
@@ -141,14 +143,17 @@ CABiNet/
 │   ├── evaluate.yaml        # Standalone evaluate.py CLI configuration
 │   ├── train_yolo.yaml      # YOLO26-sem training configuration (Hydra)
 │   ├── dataset/             # Dataset-specific configs
-│   │   ├── cityscapes.yaml / uavid.yaml   # CABiNet training configs
-│   │   └── uavid_yolo.yaml                # Ultralytics dataset YAML
+│   │   ├── cityscapes.yaml / uavid.yaml / aeroscapes.yaml  # CABiNet training configs
+│   │   └── uavid_yolo.yaml / aeroscapes_yolo.yaml          # Ultralytics dataset YAMLs
 │   ├── model/               # CABiNet backbone configs (mobilenetv3_{large,small}.yaml)
 │   ├── yolo/                # Ultralytics YOLO configs
 │   │   ├── uavid_train.yaml / uavid_val.yaml
+│   │   ├── aeroscapes_train.yaml / aeroscapes_val.yaml
 │   │   └── model/           # Per-variant configs (yolo26{n,s,m,l,x}-sem.yaml, legacy -seg)
+│   ├── train_yolo_aeroscapes.yaml # Hydra root config for train_yolo.py on AeroScapes
 │   ├── cityscapes_info.json # Cityscapes label information
-│   └── UAVid_info.json      # UAVid label information
+│   ├── UAVid_info.json      # UAVid label information
+│   └── AeroScapes_info.json # AeroScapes label information
 ├── hf_modelcards/           # Hugging Face model card generator (template + per-model metrics)
 ├── tests/                   # Test suite
 │   ├── unit/                # Unit tests
@@ -172,6 +177,7 @@ CABiNet/
 
 - **[`cityscapes.py`](src/datasets/cityscapes.py)**: Cityscapes dataset loader with label remapping and thread-safe preprocessing
 - **[`uavid.py`](src/datasets/uavid.py)**: UAVid dataset loader — consumes the pre-converted `images/+masks/` format (same as the YOLO pipeline), `RandomCrop`-based training
+- **[`aeroscapes.py`](src/datasets/aeroscapes.py)**: AeroScapes dataset loader — same pre-converted `images/+masks/` format and `RandomCrop`-based training as `uavid.py`; source images are uniformly 1280x720, so unlike UAVid there's no mixed-resolution batching constraint
 - **[`transform.py`](src/datasets/transform.py)**: Comprehensive data augmentation including geometric, photometric, and regularization transforms
 
 #### Scripts ([`src/scripts/`](src/scripts/))
@@ -182,6 +188,7 @@ CABiNet/
 - **[`train_yolo.py`](src/scripts/train_yolo.py)**: YOLO26 semantic segmentation training/validation (Hydra CLI wrapping Ultralytics)
 - **[`infer_yolo.py`](src/scripts/infer_yolo.py)**: YOLO26-sem inference over images/videos/folders, plus a `--showcase-videos` 2x2 mosaic mode
 - **[`convert_uavid_to_yolo.py`](src/scripts/convert_uavid_to_yolo.py)**: Converts UAVid RGB colour masks → single-channel class-ID format shared by both pipelines
+- **[`convert_aeroscapes_to_yolo.py`](src/scripts/convert_aeroscapes_to_yolo.py)**: Converts AeroScapes (already single-channel class-ID masks) into the shared `images/+masks/` layout — copies (not symlinks) so the result is redistributable
 
 #### Utilities ([`src/utils/`](src/utils/))
 
@@ -197,13 +204,16 @@ CABiNet/
 - **[`train.yaml`](configs/train.yaml)**: Main CABiNet training configuration (Hydra)
 - **[`evaluate.yaml`](configs/evaluate.yaml)**: Standalone `evaluate.py` CLI configuration
 - **`dataset/*.yaml`**: Dataset-specific configurations (paths, preprocessing parameters)
-  - `cityscapes.yaml` / `uavid.yaml` — CABiNet training configs
+  - `cityscapes.yaml` / `uavid.yaml` / `aeroscapes.yaml` — CABiNet training configs
   - `uavid_yolo.yaml` — Ultralytics dataset YAML (8 classes incl. Clutter, single-channel masks, 255=ignore)
+  - `aeroscapes_yolo.yaml` — Ultralytics dataset YAML (12 classes, single-channel masks, no test split)
 - **`model/*.yaml`**: CABiNet backbone configurations
 - **`yolo/*.yaml`**: Ultralytics YOLO training/evaluation configs
   - [`uavid_train.yaml`](configs/yolo/uavid_train.yaml) — full training config (AMP, EMA, grad accum, resume, augmentation)
   - [`uavid_val.yaml`](configs/yolo/uavid_val.yaml) — validation / benchmark config
+  - [`aeroscapes_train.yaml`](configs/yolo/aeroscapes_train.yaml) / [`aeroscapes_val.yaml`](configs/yolo/aeroscapes_val.yaml) — same, for AeroScapes
   - `model/yolo26{n,s,m,l,x}-sem.yaml` — per-size model configs, selected via `'yolo/model@model=yolo26s-sem'`
+- **[`train_yolo_aeroscapes.yaml`](configs/train_yolo_aeroscapes.yaml)**: Hydra root config for `train_yolo.py` on AeroScapes (`--config-name train_yolo_aeroscapes`) — `train_yolo.yaml` remains the UAVid default
 
 ## Usage
 
@@ -274,6 +284,34 @@ Key `training_config` knobs (see [`configs/train.yaml`](configs/train.yaml) for 
 | `patience`              | Early stopping on mIoU (epochs with no improvement); 0=disabled                       |
 
 `configs/dataset/uavid.yaml`'s `augmentation:` block (degrees, translate, scale, flips, HSV, mixup) mirrors the YOLO26 pipeline's recipe below — see [`transform.py`](src/datasets/transform.py).
+
+#### AeroScapes Dataset
+
+A second aerial semantic segmentation dataset, wired in the same way as UAVid — a pre-converted `images/+masks/` layout consumed by both CABiNet and the YOLO26 pipeline. Unlike UAVid, AeroScapes source images are already single-channel class-ID masks (no RGB decoding step) and uniformly 1280x720 (no mixed-resolution batching constraint).
+
+1. **Download** the AeroScapes dataset (`JPEGImages/`, `SegmentationClass/`, `ImageSets/{trn,val}.txt`)
+
+2. **Convert** the raw dataset (see [AeroScapes → YOLO Format](#aeroscapes--yolo-format) for full details):
+
+   ```bash
+   python src/scripts/convert_aeroscapes_to_yolo.py \
+       --src /path/to/raw/aeroscapes --dst /path/to/converted --workers 8
+   ```
+
+   Unlike `convert_uavid_to_yolo.py`, this always **copies** files (no symlink option) — the converted output is meant to be redistributable as-is.
+
+3. **Configure and train**:
+
+   ```bash
+   export AEROSCAPES_YOLO_ROOT=/path/to/converted
+   # or edit configs/dataset/aeroscapes.yaml and set 'dataset_path:' directly
+
+   python src/scripts/train.py dataset=aeroscapes
+   ```
+
+   Source images are uniformly 1280x720, so — unlike UAVid — `validation_config.batch_size` can be left at its default; no special-casing is required.
+
+There is no source test split for AeroScapes (only `trn.txt`/`val.txt`); the converter only ever produces `train`/`val`.
 
 ### UAVid → YOLO Format
 
@@ -392,6 +430,83 @@ All 8 UAVid classes are valid and active — none are mapped to the ignore label
        --showcase-videos clip1.mp4 clip2.mp4 clip3.mp4 clip4.mp4 --output outputs/inference
    ```
 
+### AeroScapes → YOLO Format
+
+AeroScapes distributes ground-truth labels as **already single-channel PNG masks** (`SegmentationClass/`, pixel value = class index 0-11) — unlike UAVid, no RGB colour decoding step is needed. `convert_aeroscapes_to_yolo.py` reads the split membership from `ImageSets/{trn,val}.txt` and copies each `(image, mask)` pair into the shared layout, validating that every mask pixel is a known class ID (or `255`) along the way.
+
+#### Class mapping
+
+All 12 AeroScapes classes are valid and active — none are mapped to the ignore label:
+
+| YOLO ID | Class        | Original RGB (Visualizations) |
+| ------- | ------------ | ----------------------------- |
+| 0       | Background   | `[  0,   0,   0]`             |
+| 1       | Person       | `[192, 128, 128]`             |
+| 2       | Bike         | `[  0, 128,   0]`             |
+| 3       | Car          | `[128, 128, 128]`             |
+| 4       | Drone        | `[128,   0,   0]`             |
+| 5       | Boat         | `[  0,   0, 128]`             |
+| 6       | Animal       | `[192,   0, 128]`             |
+| 7       | Obstacle     | `[192,   0,   0]`             |
+| 8       | Construction | `[192, 128,   0]`             |
+| 9       | Vegetation   | `[  0,  64,   0]`             |
+| 10      | Road         | `[128, 128,   0]`             |
+| 11      | Sky          | `[  0, 128, 128]`             |
+
+`255` is reserved for genuinely unrecognized pixel values, which should not occur in a clean copy of the dataset — the converter validates and warns on any mask that contains one.
+
+#### Step-by-step workflow
+
+1. **Convert** (copies, not symlinks — the result is meant to be redistributable):
+
+   ```bash
+   python src/scripts/convert_aeroscapes_to_yolo.py \
+       --src /path/to/aeroscapes \
+       --dst /path/to/aeroscapes_yolo \
+       --workers 8
+   ```
+
+   Output layout:
+
+   ```
+   /path/to/aeroscapes_yolo/
+   ├── images/
+   │   ├── train/   ← copies of JPEGImages/*.jpg (2621 images)
+   │   └── val/     ← copies of JPEGImages/*.jpg (648 images)
+   └── masks/
+       ├── train/   ← copies of SegmentationClass/*.png (already single-channel)
+       └── val/
+   ```
+
+   There is no source test split — only `train`/`val` are produced.
+
+2. **Point the dataset YAML** at the converted data:
+
+   ```bash
+   export AEROSCAPES_YOLO_ROOT=/path/to/aeroscapes_yolo
+   # or edit configs/dataset/aeroscapes_yolo.yaml and set 'path:' directly
+   ```
+
+3. **Train** — either the direct Ultralytics CLI:
+
+   ```bash
+   yolo semantic train cfg=configs/yolo/aeroscapes_train.yaml
+   ```
+
+   or the repo's Hydra wrapper:
+
+   ```bash
+   python src/scripts/train_yolo.py --config-name train_yolo_aeroscapes
+   ```
+
+4. **Evaluate**:
+
+   ```bash
+   yolo semantic val cfg=configs/yolo/aeroscapes_val.yaml model=runs/aeroscapes/yolo26n/weights/best.pt
+   # or
+   python src/scripts/train_yolo.py --config-name train_yolo_aeroscapes mode=val
+   ```
+
 ### Evaluation
 
 Evaluate a trained checkpoint standalone, independent of a training run (Hydra config: [`configs/evaluate.yaml`](configs/evaluate.yaml)). Accepts either a raw model state_dict (`*_best.pth` / the final saved `.pth`) or a full training checkpoint (`checkpoint_last.pth`):
@@ -406,6 +521,11 @@ python src/scripts/evaluate.py checkpoint_path=... dataset=uavid validation_conf
 
 # UAVid test split
 python src/scripts/evaluate.py checkpoint_path=... dataset=uavid validation_config.batch_size=1 split=test
+
+# AeroScapes — source images are uniformly 1280x720, so no batch_size=1
+# constraint is needed; dataset_path comes from configs/dataset/aeroscapes.yaml
+# (no test split exists for this dataset)
+python src/scripts/evaluate.py checkpoint_path=... dataset=aeroscapes
 
 # Fast single-scale evaluation (no flip)
 python src/scripts/evaluate.py checkpoint_path=... \

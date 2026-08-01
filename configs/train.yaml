@@ -34,7 +34,7 @@ training_config:
 
   max_grad_norm: 1.0 # Gradient clipping threshold; set to null/0 to disable
   log_iter: 20 # Renamed from 'msg_iterations' — clearer intent
-  experiments_path: experiments/cabinet_experiments_large_1024x1024
+  experiments_path: experiments/${dataset.name}/cabinet_experiments_large_${dataset.cropsize[0]}x${dataset.cropsize[1]} # Output path for checkpoints, logs, etc.
   model_save_name: cabinet.pth
   resume: false # Set to true to resume from checkpoint_last.pth in experiments_path
 
