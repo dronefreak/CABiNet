@@ -26,6 +26,42 @@ class Compose(object):
         return im_lb
 
 
+class ResizeIfLarger(object):
+    """Downsize (never upsize) so the image's longer side is at most
+    ``max_size``, preserving aspect ratio. A no-op when the image already fits.
+
+    Purpose: the geometric transforms that typically run before ``RandomCrop``
+    in this pipeline (``RandomTranslate``, ``RandomRotate``, ``RandomScale``)
+    are CPU-bound PIL/numpy operations whose cost scales with the *native*
+    image resolution, not the eventual training crop size. For datasets with
+    very large native images (e.g. VDD's 4000x3000, ~11x a 1024x1024 crop),
+    this makes CPU-side augmentation the training bottleneck — the GPU sits
+    idle waiting for augmented batches (low, bursty utilization). Placing this
+    as the *first* step in the pipeline bounds per-sample CPU cost regardless
+    of native resolution, with no effect on the final crop (still exactly
+    ``cropsize``) or on crop-position randomness, as long as ``max_size`` is
+    kept comfortably larger than ``cropsize``.
+    """
+
+    def __init__(self, max_size, interp_image=Image.BILINEAR, interp_label=Image.NEAREST):
+        self.max_size = max_size
+        self.interp_image = interp_image
+        self.interp_label = interp_label
+
+    def __call__(self, im_lb):
+        im = im_lb["im"]
+        lb = im_lb["lb"]
+        w, h = im.size
+        longest = max(w, h)
+        if longest <= self.max_size:
+            return im_lb
+        scale = self.max_size / longest
+        new_w, new_h = max(1, round(w * scale)), max(1, round(h * scale))
+        im_lb["im"] = im.resize((new_w, new_h), self.interp_image)
+        im_lb["lb"] = lb.resize((new_w, new_h), self.interp_label)
+        return im_lb
+
+
 class RandomScale(object):
     """Random resize, either from a discrete list of scale factors
     (default) or a continuous range — pass ``continuous=True`` with
