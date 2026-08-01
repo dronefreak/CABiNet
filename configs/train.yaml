@@ -18,6 +18,7 @@ training_config:
   optimizer_power: 0.9
   warmup_steps: 4000
   warmup_start_lr: 1e-5
+  pretrained_ckpt_path: null # Optional path to a .pth checkpoint to resume training from (overrides resume: true)
   # max_iterations is in OPTIMIZER STEPS (not batches).
   # train.py computes this as ceil(epochs * batches_per_epoch / accum_steps).
   # Setting it here is optional — if absent, train.py derives it automatically.

@@ -1,0 +1,47 @@
+# Dataset Configuration for CABiNet training on VDD (Varied Drone Dataset)
+#
+# dataset_path must point at the PRE-CONVERTED dataset produced by
+# src/scripts/convert_vdd_to_yolo.py:
+#
+#   <dataset_path>/
+#   ├── images/{train,val,test}/   ← RGB JPEGs (uniformly 4000x3000)
+#   └── masks/{train,val,test}/    ← single-channel PNGs, pixel value = class ID
+#
+# This is NOT the raw VDD distribution (train/val/test with src/, gt/
+# sub-dirs) — convert it first:
+#   python src/scripts/convert_vdd_to_yolo.py \
+#       --src /path/to/raw/VDD --dst /path/to/converted
+#
+# All 7 classes are valid trainIds 0-6 — see https://github.com/RussRobin/VDD.
+# No colour palette or lookup table is needed at load time; the source masks
+# were already single-channel class IDs.
+#
+# Like AeroScapes and unlike UAVid, VDD source images are uniformly
+# 4000x3000, so there is no batch_size=1 validation constraint here —
+# standard batched validation works. Unlike AeroScapes, VDD ships with a
+# real train/val/test split already defined by the source distribution.
+
+name: vdd
+num_classes: 7 # Other(0), Wall(1), Road(2), Vegetation(3), Vehicle(4), Roof(5), Water(6)
+cropsize: [1024, 1024] # native res is 4000x3000 (uniform) — much larger than UAVid/AeroScapes
+dataset_path: ${oc.env:VDD_YOLO_ROOT,''} # path to the CONVERTED dataset root
+ignore_idx: 255 # label for genuinely unrecognized pixel values (should not occur)
+seed: 0
+
+# Class weights are computed at training startup from a sample of the
+# training set via training_config.cls_pw (see configs/train.yaml) — same
+# mechanism as uavid.yaml/aeroscapes.yaml, not a static per-dataset table.
+
+# Training augmentation — same knobs/defaults as configs/dataset/uavid.yaml
+# and aeroscapes.yaml; VDD is also UAV-captured imagery so the same recipe
+# applies.
+augmentation:
+  degrees: 10.0 # rotation ±10° (matches RandomRotate)
+  translate: 0.05 # small translation, fraction of image size
+  scale: 0.3 # scale jitter ±30% (continuous)
+  flipud: 0.2 # vertical flip — VDD includes top-down and oblique views
+  fliplr: 0.5 # horizontal flip
+  hsv_h: 0.01 # small hue shift (controlled imaging conditions)
+  hsv_s: 0.4 # saturation jitter
+  hsv_v: 0.3 # brightness/value jitter
+  mixup: 0.1 # probability of blending with a second random sample

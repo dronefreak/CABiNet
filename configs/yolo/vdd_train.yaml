@@ -1,0 +1,110 @@
+# =============================================================================
+# Ultralytics YOLO — VDD (Varied Drone Dataset) Semantic Segmentation Training Config
+# =============================================================================
+# Usage:
+#   yolo semantic train cfg=configs/yolo/vdd_train.yaml
+#
+# Resume an interrupted run:
+#   yolo semantic train cfg=configs/yolo/vdd_train.yaml resume=True
+#
+# Multi-GPU (DDP):
+#   yolo semantic train cfg=configs/yolo/vdd_train.yaml device=0,1,2,3
+#
+# Swap model variant (nano / small / medium / large / xlarge):
+#   yolo semantic train cfg=configs/yolo/vdd_train.yaml model=yolo26s-sem.pt name=yolo26s
+#
+# NOTE: 'semantic' is a dedicated Ultralytics task (dense per-pixel FCN-style
+# head, CE+Dice+aux loss, mIoU/pixel-acc metric) — distinct from 'segment'
+# (instance/polygon-based detection+mask head). Only the yolo26*-sem model
+# family supports it; yolov8/9/11-seg checkpoints do NOT apply here.
+# =============================================================================
+
+# ── Task & Model ─────────────────────────────────────────────────────────────
+task: semantic
+model: yolo26n-sem.pt # pretrained checkpoint (downloads automatically)
+data: configs/dataset/vdd_yolo.yaml
+
+# ── Output ───────────────────────────────────────────────────────────────────
+project: runs/vdd # results root
+name: yolo26n # run sub-dir; change per variant (yolo26s, yolo26m, …)
+exist_ok: False # set True to overwrite a previous run with the same name
+
+# ── Core training schedule ───────────────────────────────────────────────────
+epochs: 150 # VDD is tiny (280 train images) → more epochs help
+patience: 30 # early stop after N epochs without val mIoU improvement
+imgsz: 1024 # native res is 4000x3000 (uniform) — far larger than the model
+# input, so imgsz is a genuine downscale here (unlike UAVid/AeroScapes,
+# which are already closer to their imgsz)
+batch: 4 # per-GPU batch size (adjust to your VRAM — native-res VDD images are large)
+seed: 0 # reproducibility
+
+# ── Gradient accumulation ─────────────────────────────────────────────────────
+nbs: 64
+
+# ── Mixed precision (AMP) ────────────────────────────────────────────────────
+# NOTE: EMA (Exponential Moving Average) is ALWAYS applied by default.
+#       'best.pt' and 'last.pt' both contain the EMA-averaged weights.
+amp: True
+
+# ── Checkpointing ────────────────────────────────────────────────────────────
+save: True
+save_period: 10 # additionally save checkpoint_N.pt every N epochs
+
+# ── Resume ───────────────────────────────────────────────────────────────────
+resume: False # override with resume=True on CLI to resume
+
+# ── Optimizer ────────────────────────────────────────────────────────────────
+optimizer: SGD
+lr0: 0.01
+lrf: 0.01
+momentum: 0.937
+weight_decay: 0.0005
+warmup_epochs: 3.0
+warmup_momentum: 0.8
+warmup_bias_lr: 0.1
+cos_lr: True
+
+# ── Class-imbalance handling ─────────────────────────────────────────────────
+# cls_pw applies inverse-frequency class weighting to the classification loss.
+# 0.0 = disabled (uniform), 1.0 = full inverse-frequency.
+# VDD is skewed toward Vegetation/Road/Wall — Vehicle, Roof, and Water are
+# comparatively rare; 0.5 is a good start (matches UAVid/AeroScapes).
+cls_pw: 0.5
+
+# ── Augmentation ─────────────────────────────────────────────────────────────
+# Geometric
+degrees: 10.0
+translate: 0.05
+scale: 0.3
+shear: 0.0
+perspective: 0.0
+flipud: 0.2 # vertical flip (VDD includes top-down and oblique views)
+fliplr: 0.5
+
+# Colour / photometric
+hsv_h: 0.01
+hsv_s: 0.4
+hsv_v: 0.3
+
+# Mosaic / mixup — VDD has very few training images (280); heavier
+# augmentation helps offset the small dataset size
+mosaic: 0.8
+mixup: 0.15
+copy_paste: 0.15
+copy_paste_mode: flip
+
+close_mosaic: 15
+
+# ── Validation ───────────────────────────────────────────────────────────────
+val: True
+split: val
+
+# ── Compute / logging ────────────────────────────────────────────────────────
+device: 0
+workers: 8
+plots: True
+verbose: True
+deterministic: True
+
+# ── Multi-scale training (optional) ──────────────────────────────────────────
+multi_scale: 0.0

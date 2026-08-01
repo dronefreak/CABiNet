@@ -229,7 +229,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     eval_every_n = int(cfg.validation_config.get("eval_every_n_epochs", 1))
 
     # ── Model ─────────────────────────────────────────────────────────────────
-    base_path_pretrained = Path("src/models/pretrained_backbones")
+    base_path_pretrained = cfg.model.pretrained_weights if Path(cfg.model.pretrained_weights).is_absolute() else Path("src/models/pretrained_backbones")
     backbone_weights = (base_path_pretrained / cfg.model.pretrained_weights).resolve()
 
     net = CABiNet(

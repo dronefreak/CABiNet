@@ -1,0 +1,31 @@
+# =============================================================================
+# Ultralytics YOLO — VDD (Varied Drone Dataset) Validation / Benchmark Config
+# =============================================================================
+# Usage (after training):
+#   Single-scale:
+#     yolo semantic val cfg=configs/yolo/vdd_val.yaml \
+#         model=runs/vdd/yolo26n/weights/best.pt
+#
+#   Test-time augmentation (TTA):
+#     yolo semantic val cfg=configs/yolo/vdd_val.yaml \
+#         model=runs/vdd/yolo26n/weights/best.pt \
+#         augment=True
+# =============================================================================
+
+task: semantic
+data: configs/dataset/vdd_yolo.yaml
+
+imgsz: 1024
+# Unlike UAVid (batch=1 required — mixed source resolution), VDD is
+# uniformly 4000x3000, so a batched eval is safe here.
+batch: 4
+split: val
+device: 0
+workers: 4
+
+save_json: True # save per-image results for offline analysis
+plots: True # confusion matrix + class-level IoU bar chart
+verbose: True
+
+# Test-time augmentation (TTA) — enable with: augment=True on CLI
+augment: False
