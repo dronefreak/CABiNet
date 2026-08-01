@@ -349,6 +349,29 @@ A third aerial semantic segmentation dataset — [VDD (Varied Drone Dataset)](ht
 
 VDD is small (280 train / 80 val / 40 test images) — heavier augmentation (`mosaic`, `mixup`, `copy_paste`) is enabled by default in the YOLO configs to help offset this.
 
+#### Finetuning CABiNet from a pretrained checkpoint
+
+All CABiNet aerial datasets (UAVid, AeroScapes, VDD) share the same backbone/CAB/spatial/fusion
+architecture and only differ in the final classifier heads (sized by `num_classes`). Rather than
+always starting from ImageNet backbone weights, `training_config.pretrained_ckpt_path` warm-starts
+the **whole model** from a checkpoint trained on a different aerial dataset — converges
+substantially faster than backbone-only init, since the CAB/fusion layers are already adapted to
+aerial imagery, not just the backbone.
+
+```bash
+# Finetune on AeroScapes starting from a UAVid-trained checkpoint
+python src/scripts/train.py dataset=aeroscapes \
+    training_config.pretrained_ckpt_path=experiments/uavid/.../checkpoint_last.pth
+```
+
+Only parameters whose name **and shape** match are loaded — the two classifier heads
+(`ab.b4`, `conv_out.conv_out`) are automatically skipped (left at fresh init) whenever
+`num_classes` differs between the source checkpoint and the target dataset; everything else
+transfers. This is independent of `resume` (which restores optimizer/EMA/epoch state to continue
+an interrupted run of the _same_ experiment) — `pretrained_ckpt_path` always starts a fresh run
+(epoch 0, fresh optimizer/EMA) with warm-started weights. Accepts either a full training
+checkpoint (`checkpoint_last.pth`) or a raw model state_dict (`*_best.pth`).
+
 ### UAVid → YOLO Format
 
 UAVid distributes ground-truth labels as **3-channel RGB colour-coded masks** (in each sequence's `Labels/` directory). YOLO's semantic segmentation task requires **single-channel PNG masks** where each pixel value is a class index (0 – N-1); pixel value `255` is reserved for pixels whose colour doesn't match any known class (corrupted/anti-aliased data) and is excluded from training/eval. Per the original UAVid paper, Clutter is a valid class — it is **not** mapped to the ignore label.

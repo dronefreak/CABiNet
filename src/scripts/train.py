@@ -123,6 +123,59 @@ def _load_checkpoint(
     return start_epoch, best_miou, best_loss
 
 
+def _load_pretrained_checkpoint(net: torch.nn.Module, path: Path, device: torch.device) -> None:
+    """Warm-start model weights from a checkpoint trained on a (possibly
+    different) dataset, e.g. finetuning on AeroScapes/VDD/etc. from a
+    UAVid-trained checkpoint — converges much faster than backbone-only
+    (ImageNet) initialization since the CAB/spatial/fusion layers and the
+    backbone are all already adapted to aerial imagery.
+
+    Unlike ``_load_checkpoint`` (used by ``resume``), this only ever touches
+    model weights: the optimizer, scaler, EMA shadow, and epoch counter all
+    start fresh — this is a new training run, not a continuation of the
+    checkpoint's own run.
+
+    Accepts either a raw model state_dict or a full training checkpoint
+    (``{"model_state": ..., ...}``, as produced by ``_save_checkpoint``).
+    Only parameters whose name AND shape match the current model are loaded
+    — this is what actually enables cross-dataset finetuning, since the two
+    classifier heads (``ab.b4``, ``conv_out.conv_out``) are sized by
+    ``n_classes`` and virtually never match between datasets (UAVid=8,
+    AeroScapes=12, VDD=7, Cityscapes=19, …). Those are silently left at
+    their freshly-initialized values; everything else (backbone, CAB,
+    spatial branch, feature fusion) transfers.
+    """
+    ckpt = torch.load(path, map_location=device, weights_only=True)
+    pretrained_state = ckpt["model_state"] if isinstance(ckpt, dict) and "model_state" in ckpt else ckpt
+
+    model_state = _model_state_dict(net)
+    compatible = {
+        k: v
+        for k, v in pretrained_state.items()
+        if k in model_state and v.shape == model_state[k].shape
+    }
+    skipped_shape_mismatch = [
+        k for k in pretrained_state if k in model_state and k not in compatible
+    ]
+    skipped_unknown = [k for k in pretrained_state if k not in model_state]
+
+    model_state.update(compatible)
+    net.load_state_dict(model_state)
+
+    logger.info(
+        "Loaded %d/%d pretrained tensors from %s (%d skipped: shape mismatch — "
+        "likely the classifier heads, expected when n_classes differs)",
+        len(compatible),
+        len(pretrained_state),
+        path,
+        len(skipped_shape_mismatch),
+    )
+    if skipped_shape_mismatch:
+        logger.info("  Shape-mismatched (left at fresh init): %s", skipped_shape_mismatch)
+    if skipped_unknown:
+        logger.warning("  Unknown keys in checkpoint (ignored): %s", skipped_unknown)
+
+
 def _run_miou_eval(
     net: torch.nn.Module,
     dl: DataLoader,
@@ -229,7 +282,7 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     eval_every_n = int(cfg.validation_config.get("eval_every_n_epochs", 1))
 
     # ── Model ─────────────────────────────────────────────────────────────────
-    base_path_pretrained = cfg.model.pretrained_weights if Path(cfg.model.pretrained_weights).is_absolute() else Path("src/models/pretrained_backbones")
+    base_path_pretrained = Path("src/models/pretrained_backbones")
     backbone_weights = (base_path_pretrained / cfg.model.pretrained_weights).resolve()
 
     net = CABiNet(
@@ -241,6 +294,27 @@ def train_and_evaluate(cfg: DictConfig) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     net.to(device)
     console.log("Model moved to device!", style="info")
+
+    # Warm-start from a full checkpoint trained on a (possibly different)
+    # dataset — e.g. finetune AeroScapes/VDD from a UAVid-trained checkpoint,
+    # which converges much faster than backbone-only (ImageNet) init since
+    # the CAB/spatial/fusion layers are already adapted to aerial imagery.
+    # Independent of `resume` (below): this only ever warm-starts weights —
+    # optimizer/EMA/epoch always start fresh. If `resume=True` also finds an
+    # existing checkpoint_last.pth in THIS run's experiments_path, that full
+    # state (including further-trained weights) takes priority and overwrites
+    # what's loaded here.
+    pretrained_ckpt = cfg.training_config.get("pretrained_ckpt_path")
+    if pretrained_ckpt:
+        pretrained_ckpt_path = Path(pretrained_ckpt)
+        if not pretrained_ckpt_path.exists():
+            raise ConfigurationError(
+                f"training_config.pretrained_ckpt_path does not exist: {pretrained_ckpt_path}"
+            )
+        _load_pretrained_checkpoint(net, pretrained_ckpt_path, device)
+        console.print(
+            f"✅ Warm-started model weights from {pretrained_ckpt_path}", style="info"
+        )
 
     # EMA shadow model — constructed right after net.to(device) so the
     # internal deepcopy inherits the correct device with no extra .to() call.
