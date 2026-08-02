@@ -61,6 +61,23 @@ All numbers below are test-split mIoU (not val — see [`train_yolo.py`](src/scr
 
 CABiNet (both backbones) outperforms **every** YOLO26-sem variant on UAVid, including the largest (YOLO26x) — and does so at a fraction of the compute: CABiNet-Large (54.8 GFLOPs) beats YOLO26x (430.9 GFLOPs, ~8× more) and YOLO26m (152.3 GFLOPs, ~3× more) on both mIoU and FLOPs simultaneously. CABiNet-Small also improves substantially over the numbers originally reported in the [CABiNet paper](#citation) on this dataset.
 
+## VDD Model Zoo
+
+CABiNet and YOLO26-sem are also trained and evaluated under one shared [VDD (Varied Drone Dataset)](https://github.com/RussRobin/VDD) pipeline (`images/`+`masks/` format, 7 classes). VDD is a much smaller dataset than UAVid (280 train images) spanning varied altitudes and viewpoints; heavier augmentation (mosaic/mixup/copy-paste) is used to help offset the small training set — see the [VDD Dataset](#vdd-dataset) section below.
+
+All numbers below are test-split mIoU, same methodology as the [UAVid Model Zoo](#uavid-model-zoo) table above (Params/FLOPs are architecture-only and identical across datasets, since both are measured at 1024×1024 regardless of what the model was finetuned on).
+
+| Model                       | mIoU (%) | Params (M) | FLOPs (GFLOPs) | HF Weights                                                                  |
+| --------------------------- | -------- | ---------- | -------------- | --------------------------------------------------------------------------- |
+| YOLO26x-sem                 | 78.83    | 40.16      | 430.9          | [HF Model](https://huggingface.co/dronefreak/vdd-yolo26x-sem)               |
+| YOLO26l-sem                 | 78.57    | 17.87      | 192.4          | [HF Model](https://huggingface.co/dronefreak/vdd-yolo26l-sem)               |
+| CABiNet (MobileNetV3-Large) | 77.76    | 9.17       | 54.8           | [HF Model](https://huggingface.co/dronefreak/cabinet-mobilenetv3-large-vdd) |
+| YOLO26m-sem                 | 77.02    | 14.32      | 152.3          | [HF Model](https://huggingface.co/dronefreak/vdd-yolo26m-sem)               |
+| YOLO26s-sem                 | 76.35    | 6.50       | 44.4           | [HF Model](https://huggingface.co/dronefreak/vdd-yolo26s-sem)               |
+| YOLO26n-sem                 | 73.99    | 1.63       | 11.4           | [HF Model](https://huggingface.co/dronefreak/vdd-yolo26n-sem)               |
+
+Unlike UAVid, the two largest YOLO26-sem variants (x, l) edge out CABiNet-Large on raw mIoU here, by a small margin (≤1.1 pts) — VDD's much smaller training set and different 7-class scheme make this a genuine dataset effect, not a regression. CABiNet-Large still beats YOLO26m on mIoU while using ~64% less compute (54.8 vs 152.3 GFLOPs), and outperforms YOLO26s/YOLO26n outright on both mIoU and FLOPs.
+
 ## Installation
 
 ### Prerequisites
@@ -470,11 +487,18 @@ All 8 UAVid classes are valid and active — none are mapped to the ignore label
    > | `mosaic` / `mixup` / `copy_paste` | Aerial-tuned augmentation for small-object diversity (cars, humans)         |
    > | EMA                               | Always on — `best.pt` / `last.pt` are EMA-averaged; no separate flag needed |
 
-5. **Evaluate**:
+5. **Evaluate** (val split by default; UAVid also has a real test split) — use the Hydra wrapper, not
+   the raw `yolo semantic val cfg=...` CLI (the `semantic` task isn't reliably invokable that way;
+   `train_yolo.py` drives it correctly via the Ultralytics Python API):
 
    ```bash
+   # val split
    python src/scripts/train_yolo.py mode=val
    python src/scripts/train_yolo.py mode=val validation_config.weights=path/to/best.pt
+
+   # test split
+   python src/scripts/train_yolo.py mode=val validation_config.split=test \
+       validation_config.weights=path/to/best.pt
    ```
 
 6. **Inference & showcase mosaic**:
@@ -552,18 +576,32 @@ All 12 AeroScapes classes are valid and active — none are mapped to the ignore
    yolo semantic train cfg=configs/yolo/aeroscapes_train.yaml
    ```
 
-   or the repo's Hydra wrapper:
+   or the repo's Hydra wrapper, which also takes the same dotted-path overrides as UAVid's:
 
    ```bash
+   # Default (yolo26n-sem):
    python src/scripts/train_yolo.py --config-name train_yolo_aeroscapes
+
+   # Swap size — only override the model group:
+   python src/scripts/train_yolo.py --config-name train_yolo_aeroscapes 'yolo/model@model=yolo26s-sem'
+
+   # Override hyperparameters:
+   python src/scripts/train_yolo.py --config-name train_yolo_aeroscapes \
+       training_config.epochs=200 training_config.batch_size=8
+
+   # Resume an interrupted run:
+   python src/scripts/train_yolo.py --config-name train_yolo_aeroscapes training_config.resume=true
+
+   # Multi-GPU (DDP):
+   python src/scripts/train_yolo.py --config-name train_yolo_aeroscapes runtime.device="0,1"
    ```
 
-4. **Evaluate**:
+4. **Evaluate** (val split only — AeroScapes has no test split, see above) — use the Hydra wrapper, not
+   the raw `yolo semantic val cfg=...` CLI (the `semantic` task isn't reliably invokable that way):
 
    ```bash
-   yolo semantic val cfg=configs/yolo/aeroscapes_val.yaml model=runs/aeroscapes/yolo26n/weights/best.pt
-   # or
-   python src/scripts/train_yolo.py --config-name train_yolo_aeroscapes mode=val
+   python src/scripts/train_yolo.py --config-name train_yolo_aeroscapes mode=val \
+       validation_config.weights=runs/aeroscapes/yolo26n/weights/best.pt
    ```
 
 ### VDD → YOLO Format
@@ -623,18 +661,37 @@ All 7 VDD classes are valid and active — none are mapped to the ignore label:
    yolo semantic train cfg=configs/yolo/vdd_train.yaml
    ```
 
-   or the repo's Hydra wrapper:
+   or the repo's Hydra wrapper, which also takes the same dotted-path overrides as UAVid's:
 
    ```bash
+   # Default (yolo26n-sem):
    python src/scripts/train_yolo.py --config-name train_yolo_vdd
+
+   # Swap size — only override the model group:
+   python src/scripts/train_yolo.py --config-name train_yolo_vdd 'yolo/model@model=yolo26s-sem'
+
+   # Override hyperparameters:
+   python src/scripts/train_yolo.py --config-name train_yolo_vdd \
+       training_config.epochs=200 training_config.batch_size=8
+
+   # Resume an interrupted run:
+   python src/scripts/train_yolo.py --config-name train_yolo_vdd training_config.resume=true
+
+   # Multi-GPU (DDP):
+   python src/scripts/train_yolo.py --config-name train_yolo_vdd runtime.device="0,1"
    ```
 
-4. **Evaluate**:
+4. **Evaluate** (val split by default; VDD also has a real test split) — use the Hydra wrapper, not
+   the raw `yolo semantic val cfg=...` CLI (the `semantic` task isn't reliably invokable that way):
 
    ```bash
-   yolo semantic val cfg=configs/yolo/vdd_val.yaml model=runs/vdd/yolo26n/weights/best.pt
-   # or
-   python src/scripts/train_yolo.py --config-name train_yolo_vdd mode=val
+   # val split
+   python src/scripts/train_yolo.py --config-name train_yolo_vdd mode=val \
+       validation_config.weights=runs/vdd/yolo26n/weights/best.pt
+
+   # test split
+   python src/scripts/train_yolo.py --config-name train_yolo_vdd mode=val \
+       validation_config.split=test validation_config.weights=runs/vdd/yolo26n/weights/best.pt
    ```
 
 ### Evaluation
@@ -704,7 +761,7 @@ print(f"Peak Memory: {results['memory']['peak_mb']:.2f} MB")
 
 Pretrained MobileNetV3 backbone weights: [`src/models/pretrained_backbones/`](src/models/pretrained_backbones/).
 
-Full CABiNet + YOLO26-sem checkpoints are being published to a Hugging Face UAVid model zoo — model cards are generated from [`hf_modelcards/`](hf_modelcards/) (one Jinja template + per-model `metrics.json`; run `python hf_modelcards/generate_hf_model_zoo.py` to regenerate all cards). See [UAVid Model Zoo](#uavid-model-zoo) above for current numbers.
+Full CABiNet + YOLO26-sem checkpoints are being published to Hugging Face UAVid and VDD model zoos — model cards are generated from [`hf_modelcards/`](hf_modelcards/) (one Jinja template shared across datasets + per-model `metrics.json`; run `python hf_modelcards/generate_hf_model_zoo.py` to regenerate all cards). See [UAVid Model Zoo](#uavid-model-zoo) / [VDD Model Zoo](#vdd-model-zoo) above for current numbers.
 
 ## Testing
 

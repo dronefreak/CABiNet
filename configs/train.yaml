@@ -56,7 +56,7 @@ training_config:
   ema_tau: 2000 # decay ramp time constant, in optimizer steps
 
   # Early stopping on mIoU (evaluated on EMA weights). 0 = disabled.
-  patience: 30
+  patience: 100
 
 # Validation Configuration
 validation_config:
