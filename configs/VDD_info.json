@@ -1,0 +1,72 @@
+[
+  {
+    "hasInstances": false,
+    "category": "void",
+    "catid": 0,
+    "name": "Other",
+    "ignoreInEval": false,
+    "id": 0,
+    "color": [0, 0, 0],
+    "trainId": 0
+  },
+  {
+    "hasInstances": false,
+    "category": "construction",
+    "catid": 1,
+    "name": "Wall",
+    "ignoreInEval": false,
+    "id": 1,
+    "color": [128, 64, 0],
+    "trainId": 1
+  },
+  {
+    "hasInstances": false,
+    "category": "flat",
+    "catid": 2,
+    "name": "Road",
+    "ignoreInEval": false,
+    "id": 2,
+    "color": [128, 64, 128],
+    "trainId": 2
+  },
+  {
+    "hasInstances": false,
+    "category": "vegetation",
+    "catid": 3,
+    "name": "Vegetation",
+    "ignoreInEval": false,
+    "id": 3,
+    "color": [0, 128, 0],
+    "trainId": 3
+  },
+  {
+    "hasInstances": false,
+    "category": "vehicle",
+    "catid": 4,
+    "name": "Vehicle",
+    "ignoreInEval": false,
+    "id": 4,
+    "color": [64, 0, 128],
+    "trainId": 4
+  },
+  {
+    "hasInstances": false,
+    "category": "construction",
+    "catid": 1,
+    "name": "Roof",
+    "ignoreInEval": false,
+    "id": 5,
+    "color": [192, 0, 0],
+    "trainId": 5
+  },
+  {
+    "hasInstances": false,
+    "category": "water",
+    "catid": 5,
+    "name": "Water",
+    "ignoreInEval": false,
+    "id": 6,
+    "color": [0, 128, 192],
+    "trainId": 6
+  }
+]

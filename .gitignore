@@ -204,4 +204,17 @@ __marimo__/
 
 # Generated HF model cards — build output of hf_modelcards/generate_hf_model_zoo.py;
 # source of truth is hf_modelcards/template/ + hf_modelcards/model_metrics/
-hf_modelcards/generated/
+hf_modelcards/
+
+# PyTorch model checkpoints
+*.ckpt
+*.pt
+*.pth
+*.ptl
+
+# Experiments
+experiments/
+cabinet_github_files/
+node_modules/
+outputs/
+app.py
