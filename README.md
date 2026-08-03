@@ -6,7 +6,7 @@
 [![CI](https://github.com/dronefreak/CABiNet/actions/workflows/ci.yml/badge.svg)](https://github.com/dronefreak/CABiNet/actions/workflows/ci.yml)
 [![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 ![Maintained](https://img.shields.io/badge/Maintained-yes-2ea44f.svg)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](.github/CONTRIBUTING.md)
 
 CABiNet (Context Aggregation Network) is a dual-branch convolutional neural network designed for real-time semantic segmentation with significantly lower computational costs compared to state-of-the-art methods while maintaining competitive accuracy. The architecture is specifically optimized for autonomous systems and real-time applications.
 
@@ -77,6 +77,23 @@ All numbers below are test-split mIoU, same methodology as the [UAVid Model Zoo]
 | YOLO26n-sem                 | 73.99    | 1.63       | 11.4           | [HF Model](https://huggingface.co/dronefreak/vdd-yolo26n-sem)               |
 
 Unlike UAVid, the two largest YOLO26-sem variants (x, l) edge out CABiNet-Large on raw mIoU here, by a small margin (≤1.1 pts) — VDD's much smaller training set and different 7-class scheme make this a genuine dataset effect, not a regression. CABiNet-Large still beats YOLO26m on mIoU while using ~64% less compute (54.8 vs 152.3 GFLOPs), and outperforms YOLO26s/YOLO26n outright on both mIoU and FLOPs.
+
+## AeroScapes Model Zoo
+
+CABiNet and YOLO26-sem are also trained and evaluated under one shared [AeroScapes](https://github.com/ishann/aeroscapes) pipeline (`images/`+`masks/` format, 12 classes). AeroScapes has no source test split, so numbers below are **val-split** mIoU, unlike the test-split numbers above for UAVid/VDD — see the [AeroScapes Dataset](#aeroscapes-dataset) section below.
+
+Params/FLOPs are measured at **720×720**, not 1024×1024 like the UAVid/VDD tables above (chosen close to AeroScapes' native 1280×720 resolution) — **these FLOPs figures are not directly comparable to the UAVid/VDD ones**, only to each other within this table.
+
+| Model                       | mIoU (%) | Params (M) | FLOPs (GFLOPs) | HF Weights                                                                         |
+| --------------------------- | -------- | ---------- | -------------- | ---------------------------------------------------------------------------------- |
+| YOLO26x-sem                 | 68.36    | 40.15      | 213.0          | [HF Model](https://huggingface.co/dronefreak/aeroscapes-yolo26x-sem)               |
+| YOLO26l-sem                 | 68.00    | 17.86      | 95.1           | [HF Model](https://huggingface.co/dronefreak/aeroscapes-yolo26l-sem)               |
+| CABiNet (MobileNetV3-Large) | 67.83    | 9.18       | 27.4           | [HF Model](https://huggingface.co/dronefreak/aeroscapes-cabinet-mobilenetv3-large) |
+| YOLO26m-sem                 | 66.97    | 14.31      | 75.2           | [HF Model](https://huggingface.co/dronefreak/aeroscapes-yolo26m-sem)               |
+| YOLO26s-sem                 | 65.44    | 6.50       | 21.9           | [HF Model](https://huggingface.co/dronefreak/aeroscapes-yolo26s-sem)               |
+| YOLO26n-sem                 | 64.86    | 1.63       | 5.6            | [HF Model](https://huggingface.co/dronefreak/aeroscapes-yolo26n-sem)               |
+
+Same pattern as VDD: the top two YOLO26-sem variants edge out CABiNet-Large on raw mIoU, here by an even smaller margin (0.53 pts) — CABiNet is effectively tied with the top of the leaderboard while using ~7.8x less compute than YOLO26x (27.4 vs 213.0 GFLOPs) and ~2.7x less than YOLO26m, which it still beats outright.
 
 ## Installation
 

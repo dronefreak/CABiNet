@@ -33,7 +33,7 @@
 # Root path. Ultralytics parses this file with plain YAML (no Hydra/OmegaConf
 # env-var resolution), so this must be a literal path — edit it directly for
 # your machine, or point `data=` at a copy of this file with your own path.
-path: /home/neural_debugger/Downloads/datasets/AeroScapes/AeroScapes-YOLO
+path: /home/neural_debugger/Downloads/datasets/AeroScapes/AeroScapes-YOLO/Aeroscapes/data
 
 train: images/train # relative to path
 val: images/val # relative to path
