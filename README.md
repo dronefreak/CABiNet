@@ -30,11 +30,23 @@ on Hugging Face Spaces — run any Model Zoo checkpoint on your own aerial image
 
 ## Results
 
-Comparison on the Cityscapes (left) and UAVid (right) validation sets:
+### Cityscapes
 
 <p align="center">
-  <img src="imgs/citys.jpg" width="48%"> <img src="imgs/uavid_r.jpg" width="48%">
+  <img src="imgs/citys.jpg" width="90%">
 </p>
+
+_Top to bottom: input RGB, SwiftNet predictions, CABiNet predictions (red boxes highlight
+improvements), ground truth._
+
+### UAVid
+
+<p align="center">
+  <img src="imgs/uavid_r.jpg" width="90%">
+</p>
+
+_Columns: input image, state-of-the-art predictions, CABiNet predictions (white boxes
+highlight improvements)._
 
 ### Model Zoos
 
