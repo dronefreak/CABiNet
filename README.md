@@ -50,48 +50,45 @@ FLOPs as 2×MACs, so the families are directly comparable **within a table**).
 <details open>
 <summary><b>UAVid</b> — 8 classes; CABiNet beats every YOLO26 variant at far lower compute</summary>
 
-| Model                       | mIoU (%) | Params (M) | FLOPs (G) | Weights                                                                 |
-| --------------------------- | -------- | ---------- | --------- | ----------------------------------------------------------------------- |
-| CABiNet (MobileNetV3-Large) | 68.60    | 9.17       | 54.8      | [HF](https://huggingface.co/dronefreak/cabinet-mobilenetv3-large-uavid) |
-| CABiNet (MobileNetV3-Small) | 66.84    | 5.36       | 44.1      | [HF](https://huggingface.co/dronefreak/cabinet-mobilenetv3-small-uavid) |
-| YOLO26x-sem                 | 64.41    | 40.16      | 430.9     | [HF](https://huggingface.co/dronefreak/uavid-yolo26x-sem)               |
-| YOLO26l-sem                 | 63.28    | 17.87      | 192.4     | [HF](https://huggingface.co/dronefreak/uavid-yolo26l-sem)               |
-| YOLO26m-sem                 | 61.98    | 14.32      | 152.3     | [HF](https://huggingface.co/dronefreak/uavid-yolo26m-sem)               |
-| YOLO26s-sem                 | 61.69    | 6.50       | 44.4      | [HF](https://huggingface.co/dronefreak/uavid-yolo26s-sem)               |
-| YOLO26n-sem                 | 58.17    | 1.63       | 11.4      | [HF](https://huggingface.co/dronefreak/uavid-yolo26n-sem)               |
+| Model                       | mIoU (%) | Params (M) | FLOPs (G) | Weights                                                                           |
+| --------------------------- | -------- | ---------- | --------- | --------------------------------------------------------------------------------- |
+| CABiNet (MobileNetV3-Large) | 68.60    | 9.17       | 54.8      | [Hugging Face](https://huggingface.co/dronefreak/cabinet-mobilenetv3-large-uavid) |
+| CABiNet (MobileNetV3-Small) | 66.84    | 5.36       | 44.1      | [Hugging Face](https://huggingface.co/dronefreak/cabinet-mobilenetv3-small-uavid) |
+| YOLO26x-sem                 | 64.41    | 40.16      | 430.9     | [Hugging Face](https://huggingface.co/dronefreak/uavid-yolo26x-sem)               |
+| YOLO26l-sem                 | 63.28    | 17.87      | 192.4     | [Hugging Face](https://huggingface.co/dronefreak/uavid-yolo26l-sem)               |
+| YOLO26m-sem                 | 61.98    | 14.32      | 152.3     | [Hugging Face](https://huggingface.co/dronefreak/uavid-yolo26m-sem)               |
+| YOLO26s-sem                 | 61.69    | 6.50       | 44.4      | [Hugging Face](https://huggingface.co/dronefreak/uavid-yolo26s-sem)               |
+| YOLO26n-sem                 | 58.17    | 1.63       | 11.4      | [Hugging Face](https://huggingface.co/dronefreak/uavid-yolo26n-sem)               |
 
 </details>
 
 <details>
 <summary><b>VDD</b> — 7 classes, 280 train images; YOLO26x/l edge ahead by ≤1.1 pts</summary>
 
-| Model                       | mIoU (%) | Params (M) | FLOPs (G) | Weights                                                               |
-| --------------------------- | -------- | ---------- | --------- | --------------------------------------------------------------------- |
-| YOLO26x-sem                 | 78.83    | 40.16      | 430.9     | [HF](https://huggingface.co/dronefreak/vdd-yolo26x-sem)               |
-| YOLO26l-sem                 | 78.57    | 17.87      | 192.4     | [HF](https://huggingface.co/dronefreak/vdd-yolo26l-sem)               |
-| CABiNet (MobileNetV3-Large) | 77.76    | 9.17       | 54.8      | [HF](https://huggingface.co/dronefreak/cabinet-mobilenetv3-large-vdd) |
-| YOLO26m-sem                 | 77.02    | 14.32      | 152.3     | [HF](https://huggingface.co/dronefreak/vdd-yolo26m-sem)               |
-| YOLO26s-sem                 | 76.35    | 6.50       | 44.4      | [HF](https://huggingface.co/dronefreak/vdd-yolo26s-sem)               |
-| YOLO26n-sem                 | 73.99    | 1.63       | 11.4      | [HF](https://huggingface.co/dronefreak/vdd-yolo26n-sem)               |
+| Model                       | mIoU (%) | Params (M) | FLOPs (G) | Weights                                                                         |
+| --------------------------- | -------- | ---------- | --------- | ------------------------------------------------------------------------------- |
+| YOLO26x-sem                 | 78.83    | 40.16      | 430.9     | [Hugging Face](https://huggingface.co/dronefreak/vdd-yolo26x-sem)               |
+| YOLO26l-sem                 | 78.57    | 17.87      | 192.4     | [Hugging Face](https://huggingface.co/dronefreak/vdd-yolo26l-sem)               |
+| CABiNet (MobileNetV3-Large) | 77.76    | 9.17       | 54.8      | [Hugging Face](https://huggingface.co/dronefreak/cabinet-mobilenetv3-large-vdd) |
+| YOLO26m-sem                 | 77.02    | 14.32      | 152.3     | [Hugging Face](https://huggingface.co/dronefreak/vdd-yolo26m-sem)               |
+| YOLO26s-sem                 | 76.35    | 6.50       | 44.4      | [Hugging Face](https://huggingface.co/dronefreak/vdd-yolo26s-sem)               |
+| YOLO26n-sem                 | 73.99    | 1.63       | 11.4      | [Hugging Face](https://huggingface.co/dronefreak/vdd-yolo26n-sem)               |
 
 </details>
 
 <details>
 <summary><b>AeroScapes</b> — 12 classes; CABiNet-Large within 0.53 pts of the top at ~7.8× less compute</summary>
 
-| Model                       | mIoU (%) | Params (M) | FLOPs (G) | Weights                                                                      |
-| --------------------------- | -------- | ---------- | --------- | ---------------------------------------------------------------------------- |
-| YOLO26x-sem                 | 68.36    | 40.15      | 213.0     | [HF](https://huggingface.co/dronefreak/aeroscapes-yolo26x-sem)               |
-| YOLO26l-sem                 | 68.00    | 17.86      | 95.1      | [HF](https://huggingface.co/dronefreak/aeroscapes-yolo26l-sem)               |
-| CABiNet (MobileNetV3-Large) | 67.83    | 9.18       | 27.4      | [HF](https://huggingface.co/dronefreak/aeroscapes-cabinet-mobilenetv3-large) |
-| YOLO26m-sem                 | 66.97    | 14.31      | 75.2      | [HF](https://huggingface.co/dronefreak/aeroscapes-yolo26m-sem)               |
-| YOLO26s-sem                 | 65.44    | 6.50       | 21.9      | [HF](https://huggingface.co/dronefreak/aeroscapes-yolo26s-sem)               |
-| YOLO26n-sem                 | 64.86    | 1.63       | 5.6       | [HF](https://huggingface.co/dronefreak/aeroscapes-yolo26n-sem)               |
+| Model                       | mIoU (%) | Params (M) | FLOPs (G) | Weights                                                                                |
+| --------------------------- | -------- | ---------- | --------- | -------------------------------------------------------------------------------------- |
+| YOLO26x-sem                 | 68.36    | 40.15      | 213.0     | [Hugging Face](https://huggingface.co/dronefreak/aeroscapes-yolo26x-sem)               |
+| YOLO26l-sem                 | 68.00    | 17.86      | 95.1      | [Hugging Face](https://huggingface.co/dronefreak/aeroscapes-yolo26l-sem)               |
+| CABiNet (MobileNetV3-Large) | 67.83    | 9.18       | 27.4      | [Hugging Face](https://huggingface.co/dronefreak/aeroscapes-cabinet-mobilenetv3-large) |
+| YOLO26m-sem                 | 66.97    | 14.31      | 75.2      | [Hugging Face](https://huggingface.co/dronefreak/aeroscapes-yolo26m-sem)               |
+| YOLO26s-sem                 | 65.44    | 6.50       | 21.9      | [Hugging Face](https://huggingface.co/dronefreak/aeroscapes-yolo26s-sem)               |
+| YOLO26n-sem                 | 64.86    | 1.63       | 5.6       | [Hugging Face](https://huggingface.co/dronefreak/aeroscapes-yolo26n-sem)               |
 
 </details>
-
-Model cards are generated from [`hf_modelcards/`](hf_modelcards/) — run
-`python hf_modelcards/generate_hf_model_zoo.py` to regenerate.
 
 ## Installation
 
