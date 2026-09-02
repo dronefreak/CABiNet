@@ -42,11 +42,20 @@ improvements), ground truth._
 ### UAVid
 
 <p align="center">
-  <img src="imgs/uavid_r.jpg" width="90%">
+  <img src="imgs/uavid_accuracy_latency.png" width="80%">
 </p>
 
-_Columns: input image, state-of-the-art predictions, CABiNet predictions (white boxes
-highlight improvements)._
+_UAVid test mIoU (single-scale, no TTA) vs. FP16 forward-pass latency on an RTX 4070 SUPER
+(batch 1, 1024²). The dashed line is the accuracy/latency Pareto frontier: YOLO26n/s are
+lower-latency points on it, YOLO26m/l/x are dominated, and CABiNet holds the
+higher-accuracy end._
+
+<p align="center">
+  <img src="imgs/uavid_qualitative.png" width="90%">
+</p>
+
+_Two UAVid test frames, both single-scale. Columns: input, YOLO26x-sem, CABiNet-L, ground
+truth._
 
 ### Model Zoos
 
